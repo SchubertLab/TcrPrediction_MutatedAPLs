@@ -14,18 +14,17 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 
 
-def train():
+#%% training and evaluation
+
+def train(tdf, aa_features):
     # disable parallel processing if running from within spyder
     n_jobs = 1 if 'SPY_PYTHONPATH' in os.environ else -1
 
-    tdf = df.query('mut_pos>=0')
-    fit_data = full_aa_features(tdf, aa_features, interactions=True, include_tcr=True)
-
+    fit_data = full_aa_features(tdf, aa_features, include_tcr=True)
     print('total features', fit_data.shape[1])
 
     perf = []
-    #for test_tcr in tqdm(tdf['tcr'].unique(), ncols=50):
-    for test_tcr in tqdm(['B11', 'B15', 'OT1']):
+    for test_tcr in tqdm(tdf['tcr'].unique(), ncols=50):
         test_mask = tdf['tcr'] == test_tcr
 
         xtrain = fit_data[~test_mask]
@@ -54,26 +53,27 @@ def train():
     return ppdf
 
 
-#%% training and evaluation
-
-if not os.path.exists('regression_performance.csv'):
+fname = 'results/tcr_stratified_regression_performance.csv'
+if not os.path.exists(fname):
     df = get_dataset()
-
-    # works a bit better by stratifying
-    df = df[df['tcr'].isin({'F4', 'B13', 'B11', 'OT1', 'B15'})]
+    data = df[(
+        df['mut_pos'] >= 0
+    ) & (
+        ~df['cdr3a'].isna()
+    ) & (
+        ~df['cdr3b'].isna()
+    ) & (
+        df['tcr'].isin(df.query('activation > 15')['tcr'].unique())
+    )]
 
     aa_features = get_aa_features()
-    qq = train()
-    qq.to_csv('regression_performance.csv', index=False)
+    pdf = train(data, aa_features)
+    pdf.to_csv(fname, index=False)
 else:
     print('using cached results')
+    pdf = pd.read_csv(fname)
 
-#%% read evaluation data
-
-pdf = pd.read_csv('regression_performance.csv')
-pdf = pdf[pdf['tcr'].isin({'OT1', 'B11', 'B15', 'F4', 'B13', 'G6'})]
-
-# compute absolute error per tcr
+#%%  compute metrics per tcr
 pdf['abserr'] = np.abs(pdf['err'])
 tcr_maes = pdf.groupby('tcr').apply(lambda g: pd.Series({
     'tcr_mae': g['abserr'].mean(),
@@ -82,35 +82,32 @@ tcr_maes = pdf.groupby('tcr').apply(lambda g: pd.Series({
     'spearman': g['activation'].corr(g['pred'], method='spearman'),
 }))
 
-#        tcr_mae        r2   pearson  spearman
-# tcr
-# B11   8.837565  0.196002  0.848980  0.863708
-# B15  16.432858 -0.577070  0.712094  0.724241
-# OT1   9.576967  0.051483  0.864085  0.869605
-
 print(tcr_maes)
 
 pdf = pdf.merge(tcr_maes, left_on='tcr', right_index=True)
 
 #%% plot regression
 
-pdf['tcr_title'] = pdf.apply(
-    lambda row: '{} (MAE: {:.4f})'.format(row['tcr'], row['tcr_mae']),
-    axis=1
-)
+tcr_order = pdf.groupby('tcr') \
+                .agg({'activation': 'var'}) \
+                .sort_values('activation').index
 
 g = sns.lmplot(
     x='activation',
     y='pred',
     hue='mut_pos',
-    col='tcr_title',
-    col_wrap=3,
-    ci=None, robust=True,
-    sharex=True, sharey=True,
+    col='tcr',
+    col_order=tcr_order,
+    col_wrap=8,
+    ci=None,
+    robust=True,
+    sharex=True,
+    sharey=True,
     palette='husl',
+    height=2,
     data=pdf
 )
 
-g.set(xlim=(-1, 50), ylim=(-1, 50))
+g.set(xlim=(-1, 90), ylim=(-1, 90))
 
-plt.savefig('figures/tcr_activation_regression.pdf', dpi=192)
+plt.savefig('figures/tcr_stratified_activation_regression.pdf', dpi=192)
