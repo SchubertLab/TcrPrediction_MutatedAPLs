@@ -1,0 +1,9 @@
+.vscode
+.spyproject
+.ipynb_checkpoints
+__pycache__
+*.sw[po]
+*.py[co]
+data/
+figures/
+results/
