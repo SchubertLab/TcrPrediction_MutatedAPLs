@@ -90,7 +90,7 @@ cls_strat_metrics = cls_strat_df.groupby('tcr') \
     .set_index(['tcr', 'metric'])
 
 
-metrics = pd.concat([
+metrics_df = pd.concat([
     reg_spec_metrics.merge(
         reg_strat_metrics, left_index=True, right_index=True
     ).reset_index(),
@@ -101,7 +101,7 @@ metrics = pd.concat([
 
 #%%
 
-g = sns.FacetGrid(data=metrics, col='metric', col_wrap=4,
+g = sns.FacetGrid(data=metrics_df, col='metric', col_wrap=4,
                   sharey=False, sharex=False)
 g.map(sns.scatterplot, 'tcr-specific', 'tcr-stratified', 'tcr')
 g.axes_dict['r2'].set(xlim=(0, 1), ylim=(0, 1))

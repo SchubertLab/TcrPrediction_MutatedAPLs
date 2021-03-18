@@ -14,23 +14,21 @@ from tqdm import tqdm
 from sklearn.ensemble import RandomForestClassifier
 from preprocessing import get_dataset, get_aa_features, full_aa_features
 
-
-df = get_dataset()
-df['is_activated'] = df['activation'] > 15
-data = df[(
-    df['mut_pos'] >= 0
-) & (
-    df['tcr'].isin(df.query('is_activated')['tcr'].unique())
-)]
-aa_features = get_aa_features()
-train_data = full_aa_features(data, aa_features)
-
 #%% training
 
 def tcr_specific_model_classification():
-    perf = []
-
+    df = get_dataset()
+    df['is_activated'] = df['activation'] > 15
+    data = df[(
+        df['mut_pos'] >= 0
+    ) & (
+        df['tcr'].isin(df.query('is_activated')['tcr'].unique())
+    )]
+    aa_features = get_aa_features()
+    train_data = full_aa_features(data, aa_features)
     print('training on', train_data.shape[1], 'features')
+
+    perf = []
     for t in tqdm(data['tcr'].unique()):
         fit_mask = (data['tcr'] == t)
         fit_data = train_data[fit_mask]
@@ -68,6 +66,7 @@ if not os.path.exists(fname):
     pdf = tcr_specific_model_classification()
     pdf.to_csv(fname, index=False)
 else:
+    print('using cached results')
     pdf = pd.read_csv(fname)
 
 #%% probability plots

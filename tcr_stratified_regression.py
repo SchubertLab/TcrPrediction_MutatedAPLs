@@ -16,7 +16,20 @@ import matplotlib.pyplot as plt
 
 #%% training and evaluation
 
-def train(tdf, aa_features):
+def train():
+    df = get_dataset()
+    tdf = df[(
+        df['mut_pos'] >= 0
+    ) & (
+        ~df['cdr3a'].isna()
+    ) & (
+        ~df['cdr3b'].isna()
+    ) & (
+        df['tcr'].isin(df.query('activation > 15')['tcr'].unique())
+    )]
+
+    aa_features = get_aa_features()
+
     # disable parallel processing if running from within spyder
     n_jobs = 1 if 'SPY_PYTHONPATH' in os.environ else -1
 
@@ -55,19 +68,7 @@ def train(tdf, aa_features):
 
 fname = 'results/tcr_stratified_regression_performance.csv'
 if not os.path.exists(fname):
-    df = get_dataset()
-    data = df[(
-        df['mut_pos'] >= 0
-    ) & (
-        ~df['cdr3a'].isna()
-    ) & (
-        ~df['cdr3b'].isna()
-    ) & (
-        df['tcr'].isin(df.query('activation > 15')['tcr'].unique())
-    )]
-
-    aa_features = get_aa_features()
-    pdf = train(data, aa_features)
+    pdf = train()
     pdf.to_csv(fname, index=False)
 else:
     print('using cached results')

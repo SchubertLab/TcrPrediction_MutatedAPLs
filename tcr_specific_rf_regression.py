@@ -13,24 +13,14 @@ from tqdm import tqdm
 from sklearn.ensemble import RandomForestRegressor
 from preprocessing import get_dataset, get_aa_features, full_aa_features
 
-#%% load data
-
-df = get_dataset()
-aa_features = get_aa_features()
-data = df[(
-    df['mut_pos'] >= 0
-) & (
-     df['tcr'].isin(df.query('activation > 15')['tcr'].unique())
-)]
-train_data = full_aa_features(data, aa_features)
-
-#%% evaluation on different split strategies
-
 def tcr_specific_model(
+    data,
+    train_data,
     split_fn,
     experiment_name: str,
 ):
     print('running experiment', experiment_name)
+
     perf = []
     for t in tqdm(data['tcr'].unique()):
         fit_mask = (data['tcr'] == t)
@@ -94,19 +84,33 @@ def split_leave_r_out(test_size, n_splits):
     return split
 
 
+
 fname = 'results/tcr_specific_performance.csv'
 if not os.path.exists(fname):
     print('computing results for the first time')
+    df = get_dataset()
+    aa_features = get_aa_features()
+    data = df[(
+        df['mut_pos'] >= 0
+    ) & (
+         df['tcr'].isin(df.query('activation > 15')['tcr'].unique())
+    )]
+    train_data = full_aa_features(data, aa_features)
+
     ppdf = pd.concat([
         tcr_specific_model(
+            data, train_data,
             split_leave_r_out(test_size=r / 100, n_splits=10),
             experiment_name=f'l{r}o'
         )
         for r in [95, 90, 75, 50, 25, 10]
     ] + [
-        tcr_specific_model(split_leave_amino_out, experiment_name='lao'),
-        tcr_specific_model(split_leave_position_out, experiment_name='lpo'),
-        tcr_specific_model(split_leave_one_out, experiment_name='lmo'),
+        tcr_specific_model(data, train_data, split_leave_amino_out,
+                           experiment_name='lao'),
+        tcr_specific_model(data, train_data, split_leave_position_out,
+                           experiment_name='lpo'),
+        tcr_specific_model(data, train_data, split_leave_one_out,
+                           experiment_name='lmo'),
     ])
 
     ppdf.to_csv(fname, index=False)
@@ -115,6 +119,7 @@ else:
     ppdf = pd.read_csv(fname)
 
 #%% compute metrics
+ppdf = pd.read_csv(fname)
 
 def compute_metrics(g):
     return pd.Series({
@@ -235,7 +240,6 @@ order = cc.query('variable=="spearman"') \
             .sort_values('value') \
             .index.to_list()
 
-
 g = sns.catplot(
     data=cc,
     x='mut_pos',
@@ -252,9 +256,9 @@ g.axes_dict['r2'].set(ylim=(0, 1))
 plt.savefig('figures/metrics-by-left-out-position.pdf', dpi=192)
 
 #%% regression lines for all lmo features and all tcrs
-order = data.groupby('tcr') \
-            .agg({'activation': 'var'}) \
-            .sort_values('activation').index
+order = ppdf.groupby('tcr') \
+            .agg({'act': 'var'}) \
+            .sort_values('act').index
 
 g = sns.lmplot(
     data=ppdf.query('features=="lmo"'),
