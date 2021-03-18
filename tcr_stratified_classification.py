@@ -14,12 +14,12 @@ import os
 from tqdm import tqdm
 
 
-def train():
+#%% training and evaluation
+def train(tdf, aa_features):
     # disable parallel processing if running from within spyder
     n_jobs = 1 if 'SPY_PYTHONPATH' in os.environ else -1
 
-    df['is_activated'] = (df['activation'] > 15).astype(np.int64)
-    tdf = df.query('mut_pos>=0')
+    tdf['is_activated'] = (tdf['activation'] > 15).astype(np.int64)
     fit_data = full_aa_features(tdf, aa_features, interactions=False,
                                 include_tcr=True)
     print('total features', fit_data.shape[1])
@@ -62,30 +62,36 @@ def train():
     return ppdf, fidf
 
 
-#%% training and evaluation
-
-if not os.path.exists('classification_performance.csv'):
+fname = 'results/tcr_stratified_classification_performance.csv'
+if not os.path.exists(fname):
     df = get_dataset()
-
-    # balancing dataset gives slightly worse performance
-    #df = df[df['tcr'].isin({'F4', 'B13', 'B11', 'OT1', 'B15'})]
+    df = df[(
+        df['mut_pos'] >= 0
+    ) & (
+        ~df['cdr3a'].isna()
+    ) & (
+        ~df['cdr3b'].isna()
+    ) & (
+        df['tcr'].isin(df.query('activation > 15')['tcr'].unique())
+    )]
 
     aa_features = get_aa_features()
-    pdf, fidf = train()
+    pdf, fidf = train(df, aa_features)
 
-    pdf.to_csv('classification_performance.csv', index=False)
-    fidf.to_csv('classification_feat_importance.csv', index=False)
+    pdf.to_csv(fname, index=False)
+    fidf.to_csv('results/tcr_stratified_classification_feat_importance.csv',
+                index=False)
 else:
     print('using cached results')
+    pdf = pd.read_csv(fname)
 
 #%% load evaluation data
-pdf = pd.read_csv('classification_performance.csv')
-pdf['is_activated'] = pdf['activation']>15
+pdf['is_activated'] = pdf['activation'] > 15
 pdf = pdf.query('mut_pos >= 0')
 pdf = pdf[pdf['tcr'].isin(pdf.query('is_activated')['tcr'].unique())]
 
 #%% predicted probabilities
-g = sns.FacetGrid(pdf, col='tcr', col_wrap=2, ylim=(0, 1))
+g = sns.FacetGrid(pdf, col='tcr', col_wrap=8, ylim=(0, 1))
 g.map(sns.stripplot,  'is_activated', 'pred', 'mut_pos',
       order=[False, True], hue_order=range(8), palette='husl')
 g.map(sns.pointplot, 'is_activated', 'pred', color='C3', order=[False, True])
@@ -93,57 +99,49 @@ for ax in g.axes:
     plt.setp(ax.lines, zorder=100)
     plt.setp(ax.collections, zorder=100, label="")
 g.add_legend()
-plt.savefig('figures/tcr_activation_prediction.pdf', dpi=192)
+plt.savefig('figures/tcr_stratified_activation_prediction.pdf', dpi=192)
 
 #%% roc auc curves
 
-plt.figure(figsize=(6.6, 9))
+ntcrs = len(pdf['tcr'].unique())
+ncols = 8
+height = 2.5
+nrows = ntcrs // ncols + 1
+
+plt.figure(figsize=(ncols * height, nrows * height))
 for i, (tcr, q) in enumerate(pdf.groupby('tcr')):
-    plt.subplot(3, 2, i + 1)
+    plt.subplot(nrows, ncols, i + 1)
     fpr, tpr, thr = roc_curve(q['is_activated'], q['pred'])
     auc = roc_auc_score(q['is_activated'], q['pred'])
-    plt.plot(fpr, tpr)
-    plt.title(f'{tcr} - {auc:.3f}')
-    plt.xlim(-0.1, 1.1)
-    plt.ylim(-0.1, 1.1)
-    if i == 0 or i == 3:
-        plt.ylabel('TPR')
-    else:
-        plt.yticks([])
-    if i > 2:
-        plt.xlabel('FPR')
-    else:
-        plt.xticks([])
 
-plt.tight_layout()
-sns.despine()
-plt.savefig('figures/tcr_activation_aucs.pdf', dpi=192)
-
-#%% auprc curves
-
-for i, (tcr, q) in enumerate(pdf.groupby('tcr')):
-    plt.subplot(2, 3, i + 1)
     pr, rc, thr = precision_recall_curve(q['is_activated'], q['pred'])
     aps = average_precision_score(q['is_activated'], q['pred'])
+
+    plt.plot(fpr, tpr)
     plt.plot(rc, pr)
-    plt.title(f'{tcr} - {aps:.3f}')
+    plt.title(f'{tcr}\nAUC: {auc:.2f} APS: {aps:.2f}')
+
     plt.xlim(-0.1, 1.1)
     plt.ylim(-0.1, 1.1)
-    if i == 0 or i == 3:
-        plt.ylabel('Precision')
+
+    ax = plt.gca()
+    if ax.is_first_col():
+        plt.ylabel('TPR / Pr.')
     else:
         plt.yticks([])
-    if i > 2:
-        plt.xlabel('Recall')
+
+    if ax.is_last_row():
+        plt.xlabel('FPR / Rec.')
     else:
         plt.xticks([])
 
 plt.tight_layout()
 sns.despine()
-plt.savefig('figures/tcr_activation_auprcs.pdf', dpi=192)
+plt.savefig('figures/tcr_stratified_activation_aucs.pdf', dpi=192)
+
 
 #%% feature importances
-fidf = pd.read_csv('classification_feat_importance.csv')
+fidf = pd.read_csv('results/tcr_stratified_classification_feat_importance.csv')
 fidf['pos'] = fidf['feat'].str.split('$').str[:1].str.join('$')
 
 ff = fidf.groupby(['tcr', 'feat']).agg({'imp': 'sum'}).reset_index()
@@ -159,7 +157,6 @@ print(
           .sort_values('imp', ascending=False)
           .head(25)
 )
-
 
 #%% importance plots
 
