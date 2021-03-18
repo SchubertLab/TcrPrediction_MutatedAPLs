@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-# this runs a default random forest model on B11, B15 and OT1
-#
+# runs regression specific to each TCR separately model with increasingly small datasets
 
 import os
 from sklearn import metrics
@@ -12,13 +11,17 @@ import seaborn as sns
 from sklearn.model_selection import KFold, ShuffleSplit
 from tqdm import tqdm
 from sklearn.ensemble import RandomForestRegressor
-from preprocessing import get_dataset, get_aa_features, get_features, full_aa_features
+from preprocessing import get_dataset, get_aa_features, full_aa_features
 
 #%% load data
 
 df = get_dataset()
 aa_features = get_aa_features()
-data = df[df['mut_pos'] >= 0]
+data = df[(
+    df['mut_pos'] >= 0
+) & (
+     df['tcr'].isin(df.query('activation > 15')['tcr'].unique())
+)]
 train_data = full_aa_features(data, aa_features)
 
 #%% evaluation on different split strategies
@@ -26,16 +29,10 @@ train_data = full_aa_features(data, aa_features)
 def tcr_specific_model(
     split_fn,
     experiment_name: str,
-    use_orig_props=True,
-    use_mutated_props=True,
-    use_diff_props=True,
-    use_sequence_1hot=True,
-    use_sequence_props=True,
-    use_sequence_diff=True,
 ):
     print('running experiment', experiment_name)
     perf = []
-    for t in tqdm(df['tcr'].unique()):
+    for t in tqdm(data['tcr'].unique()):
         fit_mask = (data['tcr'] == t)
         fit_data = train_data[fit_mask]
 
@@ -67,10 +64,6 @@ def tcr_specific_model(
     pdf['abserr'] = np.abs(pdf['residual'] - pdf['pred_res'])
     pdf['err'] = pdf['pred_res'] - pdf['residual']
 
-    pdf['use_mutated_props'] = use_mutated_props
-    pdf['use_sequence_1hot'] = use_sequence_1hot
-    pdf['use_sequence_props'] = use_sequence_props
-
     if experiment_name:
         pdf['features'] = experiment_name
 
@@ -101,7 +94,7 @@ def split_leave_r_out(test_size, n_splits):
     return split
 
 
-fname = f'tcr_specific_performance.csv'
+fname = 'results/tcr_specific_performance.csv'
 if not os.path.exists(fname):
     print('computing results for the first time')
     ppdf = pd.concat([
@@ -117,10 +110,9 @@ if not os.path.exists(fname):
     ])
 
     ppdf.to_csv(fname, index=False)
-
-#%% reading results
-
-ppdf = pd.read_csv(fname)
+else:
+    print('using cached results')
+    ppdf = pd.read_csv(fname)
 
 #%% compute metrics
 
@@ -133,12 +125,16 @@ def compute_metrics(g):
     })
 
 
+# compute metric for each validation fold separately
 mdf = pd.concat([
-    # compute metric for each validation fold separately
     # except for lmo CV where each validation fold contained a single sample
     # in that case we just compute a global average for each tcr
-    ppdf.query('features=="lmo"').groupby(['features', 'tcr']).apply(compute_metrics).reset_index(),
-    ppdf.query('features!="lmo"').groupby(['features', 'tcr', 'fold']).apply(compute_metrics).reset_index(),
+    ppdf.query('features=="lmo"') \
+        .groupby(['features', 'tcr']) \
+        .apply(compute_metrics).reset_index(),
+    ppdf.query('features!="lmo"') \
+        .groupby(['features', 'tcr', 'fold']) \
+        .apply(compute_metrics).reset_index(),
 ])
 
 lmdf = mdf.melt(
@@ -162,11 +158,11 @@ order =['lmo', 'l10o', 'l25o', 'l50o', 'lao', 'l75o', 'l90o', 'l95o', 'lpo']
 
 g = sns.catplot(
     data=lmdf.query('metric=="spearman"'),
-    x='features', y='value', col='tcr', col_wrap=5,
+    x='features', y='value', col='tcr', col_wrap=7,
     sharey=True, order=order, kind='strip',
 )
 g.map(sns.pointplot, 'features', 'value', order=order, color='gray')
-g.savefig(f'figures/spearman-by-split-{suffix}.pdf', dpi=192)
+g.savefig('figures/spearman-by-split.pdf', dpi=192)
 
 #%% plot metrics for all tcrs together
 
@@ -178,43 +174,85 @@ g = sns.catplot(
     #hue='tcr',
 )
 g.axes_dict['r2'].set_ylim(0, 1)
-g.savefig(f'figures/validation-metrics-by-split-together-{suffix}.pdf', dpi=192)
+g.savefig('figures/validation-metrics-by-split-together.pdf', dpi=192)
 
 #%% find which amino acids are harder to predict
 
-cc = ppdf.query('features=="lao"').groupby(['tcr', 'mut_ami']).apply(compute_metrics).reset_index().melt(['tcr', 'mut_ami'])
-order = cc.query('variable=="spearman"').groupby('mut_ami').agg({'value': 'mean'}).sort_values('value').index.to_list()
-#sns.catplot(data=cc, x='mut_ami', y='value', hue='tcr', kind='point', dodge=True, row='variable', sharey=False, order=order)
-sns.catplot(data=cc, x='mut_ami', y='value', kind='box', dodge=True, col='variable', sharey=False, order=order, height=3.5)
-plt.savefig(f'figures/metrics-by-left-out-amino-{suffix}.pdf', dpi=192)
+cc = ppdf.query('features=="lao"') \
+        .groupby(['tcr', 'mut_ami']) \
+        .apply(compute_metrics) \
+        .reset_index() \
+        .melt(['tcr', 'mut_ami'])
+
+order = cc.query('variable=="spearman"') \
+        .groupby('mut_ami') \
+        .agg({'value': 'mean'}) \
+        .sort_values('value') \
+        .index.to_list()
+
+g = sns.catplot(
+    data=cc,
+    x='mut_ami',
+    y='value',
+    col='variable',
+    kind='box',
+    dodge=True,
+    sharey=False,
+    order=order,
+    height=3.5
+)
+g.axes_dict['r2'].set(ylim=(0, 1))
+plt.savefig('figures/metrics-by-left-out-amino.pdf', dpi=192)
 
 #%% find which positions are harder to predict
 
-cc = ppdf.query('features=="lpo"').groupby(['tcr', 'mut_pos']).apply(compute_metrics).reset_index().melt(['tcr', 'mut_pos'])
-order = cc.query('variable=="spearman"').groupby('mut_pos').agg({'value': 'mean'}).sort_values('value').index.to_list()
-#sns.catplot(data=cc, x='mut_pos', y='value', hue='tcr', kind='point', dodge=True, row='variable', sharey=False, order=order)
-sns.catplot(data=cc, x='mut_pos', y='value', kind='box', dodge=True, col='variable', sharey=False, order=order, height=3.5)
-plt.savefig(f'figures/metrics-by-left-out-position-{suffix}.pdf', dpi=192)
+cc = ppdf.query('features=="lpo"') \
+        .groupby(['tcr', 'mut_pos']) \
+        .apply(compute_metrics) \
+        .reset_index() \
+        .melt(['tcr', 'mut_pos'])
 
-#%% regression lines for all features and tcrs
-g = sns.lmplot(
-    x='act', y='pred', hue='mut_pos',
-    row='features', col='tcr',
-    ci=None, robust=True,
-    sharex=True, sharey=True,
-    palette='husl',
-    data=ppdf
+order = cc.query('variable=="spearman"') \
+            .groupby('mut_pos') \
+            .agg({'value': 'mean'}) \
+            .sort_values('value') \
+            .index.to_list()
+
+
+g = sns.catplot(
+    data=cc,
+    x='mut_pos',
+    y='value',
+    kind='box',
+    dodge=True,
+    col='variable',
+    sharey=False,
+    order=order,
+    height=3.5
 )
-plt.savefig(f'figures/tcr_specific_regression_{suffix}.pdf', dpi=192)
+
+g.axes_dict['r2'].set(ylim=(0, 1))
+plt.savefig('figures/metrics-by-left-out-position.pdf', dpi=192)
 
 #%% regression lines for all lmo features and all tcrs
+order = data.groupby('tcr') \
+            .agg({'activation': 'var'}) \
+            .sort_values('activation').index
+
 g = sns.lmplot(
-    x='act', y='pred', hue='mut_pos',
-    col='tcr', col_wrap=7,
-    ci=None, robust=True,
-    sharex=True, sharey=True,
-    palette='husl', height=2,
     data=ppdf.query('features=="lmo"'),
+    x='act',
+    y='pred',
+    hue='mut_pos',
+    col='tcr',
+    col_wrap=8,
+    ci=None,
+    robust=True,
+    sharex=True,
+    sharey=True,
+    palette='husl',
+    height=2,
+    col_order=order
 )
 g.set(xlim=(0, 80), ylim=(0, 80))
-plt.savefig(f'figures/tcr_specific_regression_lmo_features_{suffix}.pdf', dpi=192)
+plt.savefig('figures/tcr_specific_regression_lmo_features.pdf', dpi=192)
