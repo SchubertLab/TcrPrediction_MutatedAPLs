@@ -72,7 +72,7 @@ else:
 
 #%% probability plots
 
-g = sns.FacetGrid(pdf, col='tcr', col_wrap=9, ylim=(0, 1))
+g = sns.FacetGrid(pdf, col='tcr', col_wrap=9, ylim=(0, 1), height=2)
 g.map(sns.stripplot,  'is_activated', 'pred', 'mut_pos',
       order=[False, True], hue_order=range(8), palette='husl')
 g.map(sns.pointplot, 'is_activated', 'pred', color='C3', order=[False, True])

@@ -124,7 +124,6 @@ def compute_metrics(g):
         'spearman': g['act'].corr(g['pred'], method='spearman'),
     })
 
-
 # compute metric for each validation fold separately
 mdf = pd.concat([
     # except for lmo CV where each validation fold contained a single sample
@@ -155,7 +154,6 @@ print(lmdf.groupby([
 #%% plot spearman for each tcr separately
 
 order =['lmo', 'l10o', 'l25o', 'l50o', 'lao', 'l75o', 'l90o', 'l95o', 'lpo']
-
 g = sns.catplot(
     data=lmdf.query('metric=="spearman"'),
     x='features', y='value', col='tcr', col_wrap=7,
@@ -164,7 +162,26 @@ g = sns.catplot(
 g.map(sns.pointplot, 'features', 'value', order=order, color='gray')
 g.savefig('figures/spearman-by-split.pdf', dpi=192)
 
-#%% plot metrics for all tcrs together
+
+#%% compare lmo metrics across tcrs
+
+order = lmdf.query('features=="lmo" & metric=="spearman"') \
+            .sort_values('value')['tcr']
+
+g = sns.catplot(
+    data=lmdf.query('features=="lmo"'),
+    x='tcr', y='value', col='metric',
+    order=order,
+    sharey=False, height=3.5,
+)
+g.axes_dict['r2'].set_ylim(0, 1)
+for ax in g.axes_dict.values():
+    ax.tick_params(rotation=90)
+
+g.savefig('figures/validation-metrics-by-tcr.pdf', dpi=192)
+
+
+#%% plot metrics for all tcrs together by split
 
 g = sns.catplot(
     data=lmdf,
