@@ -31,7 +31,7 @@ def get_old_dataset():
     ).reset_index()
 
     tcr_df = pd.read_csv(
-    'data/naive repertoire SIINFEKL APL landscape data V2 TCR INFO.csv'
+        'data/naive repertoire SIINFEKL APL landscape data V2 TCR INFO.csv'
     )
     tcr_df['tcr'] = tcr_df['sample id (TCR)'].apply(
         lambda s: s.split('_')[3] if '_' in s else s.replace('-', '')
@@ -139,11 +139,41 @@ def get_new_dataset():
 
 #%% full dataset
 
+def read_fasta(fname):
+    with open(fname) as f:
+        pname = None
+        prots = {}
+        for row in f:
+            row = row.strip()
+            if not row:
+                continue
+
+            if row[0] == '>':
+                if pname is not None:
+                    prots[pname] = ''.join(prots[pname])
+                pname = row[1:]
+
+                prots[pname] = []
+            else:
+                prots[pname].append(row)
+    if pname is not None:
+        prots[pname] = ''.join(prots[pname])
+    return prots
+
+
 def get_dataset():
-    return pd.concat([
+    df = pd.concat([
         get_old_dataset(),
         get_new_dataset(),
     ])
+
+    cadf = pd.DataFrame(read_fasta('data/cdr3a-aligned.fasta').items(),
+                        columns=['tcr', 'cdr3a_aligned'])
+
+    cbdf = pd.DataFrame(read_fasta('data/cdr3b-aligned.fasta').items(),
+                        columns=['tcr', 'cdr3b_aligned'])
+
+    return df.merge(cadf, how='outer').merge(cbdf, how='outer')
 
 
 #%% amino acid features
