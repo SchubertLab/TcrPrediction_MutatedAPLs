@@ -2,43 +2,31 @@
 # -*- coding: utf-8 -*-
 # this script estimates the permutation feature importance for tcr-stratified classification
 
+import os
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import seaborn as sns
 from scipy import stats
 from sklearn import metrics
-import matplotlib.pyplot as plt
-import pandas as pd
-import numpy as np
-import seaborn as sns
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
-from preprocessing import get_dataset, get_aa_features, full_aa_features, get_aa_factors, build_feature_groups, decorrelate_groups
-from sklearn.metrics import average_precision_score, precision_recall_curve, roc_auc_score, roc_curve
-import os
+from sklearn.metrics import (average_precision_score, precision_recall_curve,
+                             roc_auc_score, roc_curve)
 from tqdm import tqdm
 
-#%%
+from preprocessing import (add_activation_thresholds, build_feature_groups,
+                           decorrelate_groups, full_aa_features,
+                           get_aa_factors, get_aa_features,
+                           get_complete_dataset, get_dataset)
 
-# from preprocessing import get_complete_dataset
-# ds = get_complete_dataset()
-# ps = ds.pivot_table(index=['tcr', 'mut_pos', 'mut_ami'], columns='normalization', values='activation')
-# g = sns.pairplot(ps.reset_index(), vars=['AS', 'OT1', 'none'], hue='tcr')
-# plt.suptitle('Comparison of activation values for different normalizations')
-# plt.savefig('/tmp/norm.pdf', dpi=192)
-
-
-# c3as = set(tdf['cdr3a_aligned'].tolist())
-# counts = {}
-# for c in c3as:
-#     for i, a in enumerate(c):
-#         if i not in counts:
-#             counts[i] = {}
-#         if a not in counts[i]:
-#             counts[i][a] = 0
-#         counts[i][a] += 1
 
 #%% training and evaluation
-
 def shuffle(df, col_mask, keep_rows=None):
     if keep_rows is None:
         keep_rows = np.array([True] * len(df))
+
+    assert len(df.index) == len(set(df.index)), 'index must be unique'
 
     xgroup = df[keep_rows].loc[:, col_mask]
     xothers = df[keep_rows].loc[:, ~col_mask]
@@ -51,7 +39,7 @@ def shuffle(df, col_mask, keep_rows=None):
     ], axis=1)
     assert np.all(np.isfinite(xshuffle)), 'failed to concat'
 
-    xshuffle = xshuffle[df.columns]
+    xshuffle = xshuffle[df.columns]  # re-arrange columns
     assert (col_mask.sum() == 0
             or np.all(df.loc[keep_rows, col_mask].std(axis=0) < 1e-6)
             or np.any(xshuffle.values != df[keep_rows].values)), 'failed to shuffle'
@@ -61,17 +49,16 @@ def shuffle(df, col_mask, keep_rows=None):
 
 
 def train():
-    df = get_dataset()
+    df = get_dataset(normalization='AS')
+
     tdf = df[(
         df['mut_pos'] >= 0
     ) & (
         ~df['cdr3a'].isna()
     ) & (
         ~df['cdr3b'].isna()
-    ) & (
-        df['tcr'].isin(df.query('activation > 15')['tcr'].unique())
     )]
-    tdf['is_activated'] = (tdf['activation'] > 15).astype(np.int64)
+    tdf['is_activated'] = tdf['activation'] > 46.9
 
     aa_features = get_aa_features()
     fit_data = full_aa_features(tdf, aa_features, include_tcr=True)
@@ -108,46 +95,22 @@ def train():
             ])
             if group != 'all' and column_mask.sum() == 0:
                 continue
-            
-            # exclude samples in this group with gaps in whis position from shuffling,
-            # meaning that (1) if the tcr has a gap in this particular position it will
-            # be excluded from evaluation and (2) otherwise, shuffling will not introduce
-            # a gap in this position.
-            # this is to preserve realistic alignments without introducing or removing
-            # gaps. this does not apply to shuffling the entire cdr3 or alpha/beta chains,
-            # since doing so preserves biological relevance
-            gaps_cols = np.array([
-                any(c.startswith(d) for d in cols) and 'is_gap' in c
-                for c in fit_data.columns
-            ])
-            
-            if group not in ('cdr3', 'cdr3a', 'cdr3b') and gaps_cols.any():
-                nogaps_mask = (fit_data.loc[:, gaps_cols] < 0.5).any(axis=1)
-            else:
-                nogaps_mask = pd.Series(np.ones(fit_data.shape[0]).astype(np.bool),
-                                        index=fit_data.index)
 
-            if not np.any(test_mask & nogaps_mask):
-                tqdm.write(f'skipped {group} on {test_tcr} because it has a gap')
+            if group.startswith('cdr3a_') or group.startswith('cdr3b_'):
+                # do not shuffle individual cdr3a/b positioons
+                # given the high collinearity between them I don't think
+                # we can get reliable information about the importance of
+                # a single position there
                 continue
-            elif not nogaps_mask.all():
-                ts = tdf[nogaps_mask].tcr.unique().tolist()
-                tqdm.write(
-                    f'excluding gaps from {group} restricted samples to {len(ts)} TCRs: ' + ', '.join(ts)
-                )
-                if len(ts) < 10:
-                    tqdm.write(f'too few TCRs remain to obtain reliable estimates for {group} on {test_tcr}, skipping.')
-                    continue
 
             # perform successive rounds of shuffling and evaluation
             # since we are performing a leave-tcr-out evaluation, shuffling includes
-            # samples from tcrs in the training set (possibly excluding samples with
-            # gaps in the position we are shuffling, as per above)
+            # samples from tcrs in the training set
             for i in range(15):
-                xshuffle = shuffle(fit_data[nogaps_mask], column_mask)
-                shuffle_preds = reg.predict_proba(xshuffle[test_mask[nogaps_mask]])[:, 1]
+                xshuffle = shuffle(fit_data, column_mask)
+                shuffle_preds = reg.predict_proba(xshuffle[test_mask])[:, 1]
 
-                pdf = tdf[test_mask & nogaps_mask][[
+                pdf = tdf[test_mask][[
                     'tcr', 'mut_pos', 'mut_ami', 'wild_activation',
                     'activation', 'is_activated'
                 ]]
@@ -161,7 +124,8 @@ def train():
     return ppdf
 
 
-fname = 'results/tcr_stratified_shuffle_importance.csv'
+#%%
+fname = 'results/tcr_stratified_permutation_importance.csv.gz'
 if not os.path.exists(fname):
     pdf = train()
     pdf.to_csv(fname, index=False)
@@ -171,7 +135,6 @@ else:
 
 
 #%% computing performance (only for activated tcrs)
-
 mdf = pdf[pdf['tcr'].isin(
     pdf[pdf['is_activated'] > 0.5]['tcr'].unique()
 )].groupby(['tcr', 'group', 'shuffle']).apply(lambda q: pd.Series({
@@ -180,8 +143,8 @@ mdf = pdf[pdf['tcr'].isin(
     #'spearman': stats.spearmanr(q['activation'], q['pred'])[0],
 })).reset_index().drop(columns='shuffle')
 
-#%%
 
+#%%
 ddf = mdf.melt(['tcr', 'group']).merge(
     mdf[
         mdf['group'] == 'all'
@@ -191,40 +154,79 @@ ddf = mdf.melt(['tcr', 'group']).merge(
 ddf['diff'] = ddf['value'] - ddf['base']
 ddf['rel'] = ddf['value'] / ddf['base'] - 1  # positive = increase
 ddf['item'] = ddf['group'].str.split('_').str[0]
+ddf['is_educated'] = ddf['tcr'].str.startswith('ED')
 
 #%%
+print(ddf.query(
+    'variable == "auc" & is_educated'
+).groupby('group')['value'].median().sort_values())
 
+
+#%% feature importance
 g = sns.catplot(
-    data=ddf.query('tcr!="G6" & variable=="auc" & item != "all"'),
-    orient='h',
-    y='group',
-    x='rel',
-    col='item',
-    sharey=False,
-    ci='sd',
-    dodge=True,
-    aspect=0.7,
+    data=ddf[(
+        ddf['variable'] == 'auc'
+    ) & (
+        ddf['group'].str.startswith('pos_')
+          | ddf['group'].isin(['cdr3', 'all'])
+    )],
+    col='is_educated',
+    x='group',
+    y='value',
+    sharey=True,
+    #ci='sd',
+    #dodge=True,
+    aspect=1,
     height=5,
-    kind='point',
+    kind='box',
     #hue='tcr',
-    zorder=2
-)
-
-g.map(sns.stripplot,
-    'rel',
-    'group',
-    'tcr',
-    dodge=True,
-    hue_order=sorted(ddf['tcr'].unique()),
     palette='husl',
-    zorder=1
+    zorder=2,
+    showmeans=True,
+    notch=True,
+    meanprops={'mfc': 'k', 'mec': 'k'}
 )
 
-for ax in g.axes_dict.values():
-    ax.plot([0, 0], ax.get_ylim(), 'r--')
-
+g.set(ylim=(0.5, 1))
 g.savefig('figures/permutation_feature_importance.pdf', dpi=192)
 g.savefig('figures/permutation_feature_importance.png', dpi=192)
+
+#%% importance for educated repertoire only
+
+
+g = sns.catplot(
+    data=ddf[(
+        ddf['variable'] == 'auc'
+    ) & (
+        ddf['group'].str.startswith('pos_') | ddf['group'].isin(['cdr3', 'all'])
+    ) & (
+        ddf['is_educated']
+    )].rename(columns={
+        'value': 'AUC', 'group': 'Permutation'
+    }).replace({
+        'pos_0': 'P1', 'pos_1': 'P2', 'pos_2': 'P3', 'pos_3': 'P4',
+        'pos_4': 'P5', 'pos_5': 'P6', 'pos_6': 'P7', 'pos_7': 'P8',
+        'cdr3': 'CDR3', 'all': '-'
+    }),
+    x='Permutation',
+    y='AUC',
+    sharey=True,
+    #ci='sd',
+    #dodge=True,
+    aspect=1,
+    height=4,
+    kind='box',
+    #hue='tcr',
+    palette='husl',
+    zorder=2,
+    showmeans=True,
+    notch=True,
+    meanprops={'mfc': 'k', 'mec': 'k'}
+)
+
+g.set(ylim=(0.5, 1), title='Feature Importance', ylabel='AUC for Educated Repertoire')
+g.savefig('figures/permutation_feature_importance_educated.pdf', dpi=192)
+g.savefig('figures/permutation_feature_importance_educated.png', dpi=192)
 
 
 #%% decrease by position
@@ -249,20 +251,22 @@ g = sns.catplot(
     ci='sd',
     legend=False,
     #order=[f'P{i}' for i in range(1, 9)],
-    order=pddf.groupby(['Position']).agg({'Relative Increase': 'mean'}).sort_values('Relative Increase').index,
+    order=pddf.groupby(['Position']).agg({
+        'Relative Increase': 'mean'
+    }).sort_values('Relative Increase').index,
     zorder=2,  # above points
 )
 
 g.map(sns.stripplot,
-    'Position',
-    'Relative Increase',
-    'TCR',
-    dodge=True,
-    #order=[f'P{i}' for i in range(1, 9)],
-    order=pddf.groupby(['Position']).agg({'Relative Increase': 'mean'}).sort_values('Relative Increase').index,
-    hue_order=sorted(pddf['TCR'].unique()),
-    palette='husl',
-    zorder=1
+      'Position',
+      'Relative Increase',
+      'TCR',
+      dodge=True,
+      #order=[f'P{i}' for i in range(1, 9)],
+      order=pddf.groupby(['Position']).agg({'Relative Increase': 'mean'}).sort_values('Relative Increase').index,
+      hue_order=sorted(pddf['TCR'].unique()),
+      palette='husl',
+      zorder=1
 )
 g.add_legend(title='TCR', ncol=2)
 g.ax.set_yticklabels([f'{100 * y:.0f}%' for y in g.ax.get_yticks()])

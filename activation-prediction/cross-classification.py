@@ -2,23 +2,28 @@
 # -*- coding: utf-8 -*-
 # this script finds the predictive performance on tcr x when training  only on tcr y
 
-from scipy import stats
-import matplotlib.pyplot as plt
-import pandas as pd
-import numpy as np
-import seaborn as sns
-from sklearn.ensemble import RandomForestClassifier
-from preprocessing import get_dataset, get_aa_features, full_aa_features, get_aa_factors
-from sklearn.metrics import roc_curve, roc_auc_score
-from sklearn.metrics import average_precision_score, precision_recall_curve
-import os
-from tqdm import tqdm
 import itertools
+import os
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import seaborn as sns
+from scipy import stats
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import (average_precision_score, precision_recall_curve,
+                             roc_auc_score, roc_curve)
+from tqdm import tqdm
+
+from preprocessing import (full_aa_features, get_aa_factors, get_aa_features,
+                           get_dataset)
 
 
 #%% training and evaluation
 def train():
-    df = get_dataset()
+    df = get_dataset(normalization='AS')
+    df['is_activated'] = df['activation'] > 46.9
+
     tdf = df[(
         df['mut_pos'] >= 0
     ) & (
@@ -26,12 +31,10 @@ def train():
     ) & (
         ~df['cdr3b'].isna()
     ) & (
-        df['tcr'].isin(df.query('activation > 15')['tcr'].unique())
+        df['tcr'].isin(df.query('is_activated')['tcr'].unique())
     )]
 
     aa_features = get_aa_features()
-
-    tdf['is_activated'] = (tdf['activation'] > 15).astype(np.int64)
     fit_data = full_aa_features(tdf, aa_features, include_tcr=True)
     print('total features', fit_data.shape[1])
 
@@ -66,7 +69,7 @@ def train():
     return ppdf
 
 
-fname = 'results/cross-performance.csv'
+fname = 'results/cross-performance.csv.gz'
 if not os.path.exists(fname):
     pdf = train()
     pdf.to_csv(fname, index=False)
@@ -78,7 +81,17 @@ else:
 
 ddf = pd.read_csv(
     '../data/distances_activated_tcrs.csv'
-).melt(
+).set_index('Unnamed: 0')
+
+# copy OT1 distances to new names
+ddf['OTI_PH'] = ddf['OT1']
+ddf['LR_OTI_1'] = ddf['OT1']
+ddf['LR_OTI_2'] = ddf['OT1']
+ddf.loc['OTI_PH'] = ddf.loc['OT1']
+ddf.loc['LR_OTI_1'] = ddf.loc['OT1']
+ddf.loc['LR_OTI_2'] = ddf.loc['OT1']
+
+ddf = ddf.reset_index().melt(
     'Unnamed: 0'
 ).rename(columns={
     'Unnamed: 0': 'train_tcr',
@@ -93,15 +106,20 @@ ddf = pd.read_csv(
 
 #%% correlation of activations
 
+adf = pdf[
+    pdf['train_tcr'] == pdf['test_tcr']
+].sort_values(['mut_pos', 'mut_ami'])
+
 cdf = pd.DataFrame([{
     'train_tcr': t1,
     'test_tcr': t2,
     'spearman': stats.spearmanr(
-        pdf[pdf['test_tcr'] == t1]['activation'].values,
-        pdf[pdf['test_tcr'] == t2]['activation'].values
+        adf[adf['test_tcr'] == t1]['activation'].values,
+        adf[adf['test_tcr'] == t2]['activation'].values
     )[0]
-} for t1, t2 in itertools.product(pdf['train_tcr'].unique(), pdf['train_tcr'].unique())])
-
+} for t1, t2 in itertools.product(
+    pdf['train_tcr'].unique(), pdf['train_tcr'].unique()
+)])
 
 #%% merge pair data
 
@@ -117,6 +135,7 @@ pairs['TCRs'] = np.where(
     ~pairs['train_tcr'].isin(['B13', 'G6']) & ~pairs['test_tcr'].isin(['B13', 'G6']),
     'Others', 'B13 or G6',
 )
+
 g = sns.PairGrid(
     data=pairs.query('train_tcr!=test_tcr'),
     vars=['auc', 'tcrdist', 'spearman'],
@@ -132,21 +151,20 @@ g.savefig('figures/cross-performance.pdf', dpi=192)
 
 #%%
 
-dd = pairs.query('test_tcr=="OT1"')[[
+dd = pairs.query('test_tcr=="OTI_PH"')[[
     'train_tcr', 'auc', 'tcrdist'
 ]].rename(columns={
     'train_tcr': 'Other TCR',
-    'auc': 'AUC (Test on OT1)'
+    'auc': 'AUC (Test on OTI_PH)'
 }).merge(
-    pairs.query('train_tcr=="OT1"')[[
+    pairs.query('train_tcr=="OTI_PH"')[[
         'test_tcr', 'auc',
     ]].rename(columns={
         'test_tcr': 'Other TCR',
-        'auc': 'AUC (Train on OT1)'
+        'auc': 'AUC (Train on OTI_PH)'
     }),
     on='Other TCR'
-).sort_values('tcrdist')
-
+).sort_values('AUC (Test on OTI_PH)')
 
 dd['TCR-closeness'] = 1 - dd['tcrdist']
 g = sns.catplot(
@@ -155,4 +173,8 @@ g = sns.catplot(
     aspect=2.5
 )
 #g.ax.tick_params(axis='x', rotation=90)
+xl = g.ax.get_xlim()
+g.ax.plot(xl, [0.96, 0.96], 'r--')
+g.ax.set_xlim(xl)
+g.ax.text(xl[0] + 0.1, 0.98, 'Leave-OT1-out AUC', c='r')
 g.savefig('figures/cross-performance-ot1.pdf', dpi=192)

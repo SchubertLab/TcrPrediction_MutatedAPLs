@@ -3,15 +3,19 @@
 # runs regression specific to each TCR separately model with increasingly small datasets
 
 import os
-from sklearn import metrics
+import sys
+
 import matplotlib.pyplot as plt
-import pandas as pd
 import numpy as np
+import pandas as pd
 import seaborn as sns
+from sklearn import metrics
+from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import KFold, ShuffleSplit
 from tqdm import tqdm
-from sklearn.ensemble import RandomForestRegressor
-from preprocessing import get_dataset, get_aa_features, full_aa_features
+
+from preprocessing import full_aa_features, get_aa_features, get_dataset
+
 
 def tcr_specific_model(
     data,
@@ -21,29 +25,38 @@ def tcr_specific_model(
 ):
     print('running experiment', experiment_name)
 
+    # disable parallel processing if running from within spyder
+    n_jobs = 1 if 'SPY_PYTHONPATH' in os.environ else -1
+
     perf = []
-    for t in tqdm(data['tcr'].unique()):
-        fit_mask = (data['tcr'] == t)
-        fit_data = train_data[fit_mask]
+    for n in tqdm(data['normalization'].unique(), ncols=50):
+        for t in tqdm(data['tcr'].unique(), ncols=50):
+            fit_mask = (data['normalization'] == n) & (data['tcr'] == t)
+            fit_data = train_data[fit_mask]
 
-        split = split_fn(fit_data)
-        for i, (train_idx, test_idx) in enumerate(split):
-            xtrain = fit_data.iloc[train_idx]
-            xtest = fit_data.iloc[test_idx]
+            split = split_fn(fit_data)
+            for i, (train_idx, test_idx) in enumerate(split):
+                xtrain = fit_data.iloc[train_idx]
+                xtest = fit_data.iloc[test_idx]
 
-            ytrain = data.loc[fit_mask, 'residual'].iloc[train_idx]
+                ytrain = data.loc[fit_mask, 'residual'].iloc[train_idx]
 
-            clf = RandomForestRegressor().fit(xtrain, ytrain)
-            test_preds = clf.predict(xtest)
+                clf = RandomForestRegressor(
+                    n_jobs=n_jobs,
+                    n_estimators=250,
+                    max_features='sqrt',
+                    criterion='mae',
+                ).fit(xtrain, ytrain)
+                test_preds = clf.predict(xtest)
 
-            # save performance
-            pdf = data[fit_mask].iloc[test_idx][[
-                'mut_pos', 'mut_ami', 'residual', 'wild_activation'
-            ]]
-            pdf['tcr'] = t
-            pdf['fold'] = i
-            pdf['pred_res'] = test_preds
-            perf.append(pdf)
+                # save performance
+                pdf = data[fit_mask].iloc[test_idx][[
+                    'tcr', 'normalization', 'mut_pos', 'mut_ami',
+                    'residual', 'wild_activation'
+                ]]
+                pdf['fold'] = i
+                pdf['pred_res'] = test_preds
+                perf.append(pdf)
 
     # aggregate performance data
     pdf = pd.concat(perf)
@@ -84,17 +97,11 @@ def split_leave_r_out(test_size, n_splits):
     return split
 
 
-
-fname = 'results/tcr_specific_performance.csv'
+fname = 'results/tcr_specific_regression_performance.csv.gz'
 if not os.path.exists(fname):
     print('computing results for the first time')
-    df = get_dataset()
+    data = get_dataset(normalization='AS').query('mut_pos >= 0')
     aa_features = get_aa_features()
-    data = df[(
-        df['mut_pos'] >= 0
-    ) & (
-         df['tcr'].isin(df.query('activation > 15')['tcr'].unique())
-    )]
     train_data = full_aa_features(data, aa_features)
 
     ppdf = pd.concat([
@@ -118,130 +125,160 @@ else:
     print('using cached results')
     ppdf = pd.read_csv(fname)
 
-#%% compute metrics
-ppdf = pd.read_csv(fname)
+# %% compute metrics
 
 def compute_metrics(g):
     return pd.Series({
-        'mae': g['abserr'].mean(),
-        'r2': metrics.r2_score(g['act'], g['pred']),
-        'pearson': g['act'].corr(g['pred'], method='pearson'),
-        'spearman': g['act'].corr(g['pred'], method='spearman'),
+        'MAE': g['abserr'].mean(),
+        'R2': metrics.r2_score(g['act'], g['pred']),
+        'Pearson': g['act'].corr(g['pred'], method='pearson'),
+        'Spearman': g['act'].corr(g['pred'], method='spearman'),
     })
+
 
 # compute metric for each validation fold separately
 mdf = pd.concat([
     # except for lmo CV where each validation fold contained a single sample
     # in that case we just compute a global average for each tcr
     ppdf.query('features=="lmo"') \
-        .groupby(['features', 'tcr']) \
+        .groupby(['features', 'normalization', 'tcr']) \
         .apply(compute_metrics).reset_index(),
     ppdf.query('features!="lmo"') \
-        .groupby(['features', 'tcr', 'fold']) \
+        .groupby(['features', 'normalization', 'tcr', 'fold']) \
         .apply(compute_metrics).reset_index(),
 ])
 
+mdf['features'] = mdf['features'].str.upper()
+
 lmdf = mdf.melt(
-    id_vars=['tcr', 'features', 'fold'],
-    value_vars=['r2', 'pearson', 'spearman', 'mae'],
-    var_name='metric'
+    id_vars=['tcr', 'features', 'normalization', 'fold'],
+    value_vars=['R2', 'Pearson', 'Spearman', 'MAE'],
+    var_name='Metric'
+).rename(
+    columns={'features': 'Split', 'value': 'Value'}
 )
 
-print('average metrics on validation folds by tcr and features')
-print(lmdf.groupby([
-    'tcr', 'features', 'metric'
-]).agg({'value': 'mean'}).reset_index().pivot(
-    index=['tcr', 'features'],
-    columns='metric',
-    values='value'
-))
+lmdf['Is Educated'] = np.where(lmdf['tcr'].str.startswith('ED'), 'Yes', 'No')
+ppdf['Is Educated'] = np.where(ppdf['tcr'].str.startswith('ED'), 'Yes', 'No')
 
-#%% plot spearman for each tcr separately
-
-order =['lmo', 'l10o', 'l25o', 'l50o', 'lao', 'l75o', 'l90o', 'l95o', 'lpo']
-g = sns.catplot(
-    data=lmdf.query('metric=="spearman"'),
-    x='features', y='value', col='tcr', col_wrap=7,
-    sharey=True, order=order, kind='strip',
-)
-g.map(sns.pointplot, 'features', 'value', order=order, color='gray')
-g.savefig('figures/spearman-by-split.pdf', dpi=192)
+# print('average metrics on validation folds by tcr and features')
+# print(lmdf.groupby([
+#     'tcr', 'Split', 'normalization', 'Metric'
+# ]).agg({'Value': 'mean'}).reset_index().pivot(
+#     index=['tcr', 'normalization', 'Split'],
+#     columns='Metric',
+#     values='Value'
+# ))
 
 
-#%% compare lmo metrics across tcrs
+print('Spearman values')
+print(lmdf.query(
+    'normalization == "AS" & Metric == "Spearman" & Split == "LMO"'
+).groupby('Is Educated')['Value'].apply(lambda g: g.describe()))
 
-order = lmdf.query('features=="lmo" & metric=="spearman"') \
-            .sort_values('value')['tcr']
+#%%
 
-g = sns.catplot(
-    data=lmdf.query('features=="lmo"'),
-    x='tcr', y='value', col='metric',
-    order=order,
-    sharey=False, height=3.5,
-)
-g.axes_dict['r2'].set_ylim(0, 1)
-for ax in g.axes_dict.values():
-    ax.tick_params(rotation=90)
+print(lmdf.query(
+    'normalization == "AS" & Metric == "Spearman"'
+).groupby(['Is Educated', 'Split']).agg({'Value': ['median', 'std']}))
 
-g.savefig('figures/validation-metrics-by-tcr.pdf', dpi=192)
-
-
-#%% plot metrics for all tcrs together by split
+# %% plot metrics for all tcrs together by split
 
 g = sns.catplot(
-    data=lmdf.rename(
-        columns={'features': 'Split', 'value': 'Value'}
-    ).applymap(
-        lambda s: s.upper() if isinstance(s, str) else s
-    ).replace({
-        'PEARSON': 'Pearson', 'SPEARMAN': 'Spearman',
-    }),
-    x='Split', y='Value', col='metric',
-    sharey=False, order=[o.upper() for o in order], kind='box',
-    ci='sd', height=2.5,
+    data=lmdf.query('normalization == "AS"'),
+    x='Split', y='Value', col='Metric', row='normalization',
+    hue='Is Educated',
+    sharey=False, #order=[o.upper() for o in order], kind='box',
+    ci='sd', height=3, margin_titles=True,
 )
-g.axes_dict['R2'].set_ylim(-1.1, 1.1)
-for ax in g.axes_dict.values():
+
+for k, ax in g.axes_dict.items():
     ax.tick_params(axis='x', rotation=90)
+    if k[1] != 'MAE':
+        ax.set_ylim(-0.6, 1.1)
 g.set_titles(col_template="{col_name}")
+
 g.savefig('figures/validation-metrics-by-split-together.pdf', dpi=192)
 g.savefig('figures/validation-metrics-by-split-together.png', dpi=300)
 
-#%% find which amino acids are harder to predict
+# %% plot spearman for all TCRs by split
 
-cc = ppdf.query('features=="lao"') \
-        .groupby(['tcr', 'mut_ami']) \
-        .apply(compute_metrics) \
-        .reset_index() \
-        .melt(['tcr', 'mut_ami'])
+g = sns.catplot(
+    data=lmdf.query('Metric=="Spearman"'),
+    x='Split', y='Value', col='Metric', hue='Is Educated',
+    hue_order=['Yes', 'No'],
+    sharey=False, #order=[o.upper() for o in order], kind='box',
+    ci='sd', height=3.5, aspect=1.25,
+)
+for ax in g.axes_dict.values():
+    ax.tick_params(axis='x', rotation=90)
+g.set_titles(col_template="{col_name}")
 
-order = cc.query('variable=="spearman"') \
-        .groupby('mut_ami') \
-        .agg({'value': 'mean'}) \
-        .sort_values('value') \
-        .index.to_list()
+g.savefig('figures/validation-spearman-by-split-together.pdf', dpi=192)
+g.savefig('figures/validation-spearman-by-split-together.png', dpi=300)
+
+
+# %% compare lmo metrics across tcrs
+
+order = lmdf.query(
+    'Split=="LMO" & Metric=="Spearman" & normalization == "AS"'
+).sort_values('Value')['tcr']
+
+g = sns.catplot(
+    data=lmdf.query('Split=="LMO" & normalization == "AS"'),
+    x='Value', y='tcr', col='Metric',
+    order=order, row='normalization',
+    sharex=False, height=4, aspect=0.7,
+    margin_titles=True,
+)
+for k, ax in g.axes_dict.items():
+    #ax.tick_params(rotation=90)
+    #if k[1] == 'AS':
+    #    ax.set_xlim(0, 1)
+    pass
+
+g.savefig('figures/validation-metrics-by-tcr.pdf', dpi=192)
+
+# %% find which amino acids are harder to predict
+
+cc = ppdf.query('features=="lao" & normalization == "AS"') \
+    .groupby(['tcr', 'Is Educated', 'normalization', 'mut_ami']) \
+    .apply(compute_metrics) \
+    .reset_index() \
+    .melt(['tcr', 'Is Educated', 'normalization', 'mut_ami'])
+
+order = cc.query('variable=="Spearman"') \
+    .groupby('mut_ami') \
+    .agg({'value': 'mean'}) \
+    .sort_values('value') \
+    .index.to_list()
 
 g = sns.catplot(
     data=cc,
     x='mut_ami',
     y='value',
     col='variable',
+    row='normalization',
     kind='box',
+    hue='Is Educated',
     dodge=True,
+    margin_titles=True,
     sharey=False,
     order=order,
     height=3.5
 )
-g.axes_dict['r2'].set(ylim=(0, 1))
+g.axes_dict['AS', 'R2'].set(ylim=(-0.25, 1))
+g.axes_dict['AS', 'Pearson'].set(ylim=(-0.25, 1))
+g.axes_dict['AS', 'Spearman'].set(ylim=(-0.25, 1))
 plt.savefig('figures/metrics-by-left-out-amino.pdf', dpi=192)
 
-#%%
+# %%
 
 dd = cc.merge(
-    ppdf.query('features=="lao"') \
-        .groupby(['tcr', 'mut_ami']) \
-        .agg({'act': 'std'}) \
-        .rename(columns={'act': 'activation_std'}) \
+    ppdf.query('features=="lao"')
+        .groupby(['tcr', 'mut_ami'])
+        .agg({'act': 'std'})
+        .rename(columns={'act': 'activation_std'})
         .reset_index(),
     on=['tcr', 'mut_ami']
 )
@@ -250,33 +287,40 @@ g = sns.FacetGrid(
     data=dd,
     col='variable',
     sharey=False,
-    height=3.5
+    hue='Is Educated',
+    height=3.5,
+    row='normalization',
 )
-g.map(sns.scatterplot, 'activation_std', 'value', 'mut_ami')
-g.axes_dict['r2'].set(ylim=(0, 1))
+g.map(sns.scatterplot, 'activation_std', 'value')#, 'mut_ami')
+g.axes_dict['AS', 'R2'].set(ylim=(-0.25, 1))
+g.axes_dict['AS', 'Pearson'].set(ylim=(-0.25, 1))
+g.axes_dict['AS', 'Spearman'].set(ylim=(-0.25, 1))
+g.add_legend()
 plt.savefig('figures/left-out-amino-metric-vs-activation-std.pdf', dpi=192)
 
-#%%
-
-ppdf.query('features=="lao"') \
+# %%
+print(
+    ppdf.query('features == "lao" & normalization == "AS"') \
         .groupby(['tcr', 'mut_ami']) \
         .agg({'act': 'var'}) \
         .rename(columns={'act': 'activation_variance'}) \
         .reset_index().sort_values('activation_variance')
+)
 
-#%% find which positions are harder to predict
+# %% find which positions are harder to predict
 
-cc = ppdf.query('features=="lpo"') \
-        .groupby(['tcr', 'mut_pos']) \
-        .apply(compute_metrics) \
-        .reset_index() \
-        .melt(['tcr', 'mut_pos'])
+cc = ppdf.query('features=="lpo" & normalization == "AS"') \
+    .groupby(['tcr', 'Is Educated', 'normalization', 'mut_pos']) \
+    .apply(compute_metrics) \
+    .reset_index() \
+    .melt(['tcr', 'Is Educated', 'normalization', 'mut_pos'])
 
-order = cc.query('variable=="spearman"') \
-            .groupby('mut_pos') \
-            .agg({'value': 'mean'}) \
-            .sort_values('value') \
-            .index.to_list()
+
+order = cc.query('variable=="Spearman"') \
+    .groupby('mut_pos') \
+    .agg({'value': 'mean'}) \
+    .sort_values('value') \
+    .index.to_list()
 
 g = sns.catplot(
     data=cc,
@@ -285,21 +329,26 @@ g = sns.catplot(
     kind='box',
     dodge=True,
     col='variable',
+    row='normalization',
+    hue='Is Educated',
     sharey=False,
+    margin_titles=True,
     order=order,
     height=3.5
 )
 
-g.axes_dict['r2'].set(ylim=(0, 1))
+g.axes_dict['AS', 'R2'].set(ylim=(-0.25, 1))
+g.axes_dict['AS', 'Pearson'].set(ylim=(-0.25, 1))
+g.axes_dict['AS', 'Spearman'].set(ylim=(-0.25, 1))
 plt.savefig('figures/metrics-by-left-out-position.pdf', dpi=192)
 
-#%% regression lines for all lmo features and all tcrs
+# %% regression lines for all lmo features and all tcrs
 order = ppdf.groupby('tcr') \
             .agg({'act': 'var'}) \
             .sort_values('act').index
 
 g = sns.lmplot(
-    data=ppdf.query('features=="lmo"'),
+    data=ppdf.query('features=="lmo" & normalization == "AS"'),
     x='act',
     y='pred',
     hue='mut_pos',
@@ -313,5 +362,5 @@ g = sns.lmplot(
     height=2,
     col_order=order
 )
-g.set(xlim=(0, 80), ylim=(0, 80))
+#g.set(xlim=(0, 80), ylim=(0, 80))
 plt.savefig('figures/tcr_specific_regression_lmo_features.pdf', dpi=192)

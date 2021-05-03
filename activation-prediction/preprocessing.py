@@ -1,143 +1,13 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-import pandas as pd
 import numpy as np
+import pandas as pd
+from sklearn.decomposition import PCA
 from sklearn.preprocessing import PolynomialFeatures
 
-#%% old dataset
+# %%
 
-def get_mutation(epi):
-    diff = [
-        (i, a1)
-        for i, (a1, a2) in enumerate(zip(epi, 'SIINFEKL'))
-        if a1 != a2
-    ]
-
-    return diff[0] if diff else (-1, None)
-
-
-def get_old_dataset():
-    df = pd.read_csv(
-        '../data/naive repertoire SIINFEKL APL landscape data V2.csv'
-    )
-    df = df.rename(columns={'Unnamed: 0': 'epitope'})
-    df.index = df.pop('epitope')
-
-    df = df.melt(
-        ignore_index=False,
-        var_name='tcr',
-        value_name='activation'
-    ).reset_index()
-
-    tcr_df = pd.read_csv(
-        '../data/naive repertoire SIINFEKL APL landscape data V2 TCR INFO.csv'
-    )
-    tcr_df['tcr'] = tcr_df['sample id (TCR)'].apply(
-        lambda s: s.split('_')[3] if '_' in s else s.replace('-', '')
-    )
-
-    df = df.merge(
-        tcr_df[['tcr', 'CDR3β', 'CDR3α']],
-        left_on='tcr',
-        right_on='tcr',
-    ).rename(columns={
-        'CDR3α': 'cdr3a',
-        'CDR3β': 'cdr3b'
-    })
-
-    # add alignment
-    #df = df.merge(cdr3a_aligned).merge(cdr3b_aligned)
-
-    df['mut_pos'] = df['epitope'].map(lambda s: get_mutation(s)[0])
-    df['mut_ami'] = df['epitope'].map(lambda s: get_mutation(s)[1])
-    df['orig_ami'] = df['mut_pos'].map(lambda p: 'SIINFEKL'[p])
-
-    # compute residual
-    df = df.merge(
-        # wild-type activation for each tcr
-        df.query('mut_pos < 0')[[
-            'tcr', 'activation'
-        ]].rename(columns={
-            'activation': 'wild_activation'
-        }),
-        on='tcr'
-    )
-    df['residual'] = df['activation'] - df['wild_activation']
-
-    return df
-
-#%% new dataset
-def get_new_dataset():
-    # NOTE: mutations are assumed to be in the same order as old dataste
-    dfs = pd.read_excel('../data/Jurkat Prism Summary.xlsx', sheet_name=None)
-    odf = pd.read_csv('../data/naive repertoire SIINFEKL APL landscape data V2.csv')
-
-    apl_to_mutation = odf['Unnamed: 0'].map(get_mutation).to_list()
-    def apl_to_mutation_data(apl):
-        apl = int(apl)
-        pos, ami = apl_to_mutation[apl - 1]
-
-        return pd.Series({
-            'APL': apl,
-            'mut_pos': pos,
-            'mut_ami': ami,
-            'epitope': ''.join([
-                s if i != pos else ami for i, s in enumerate('SIINFEKL')
-            ]),
-            'orig_ami': 'SIINFEKL'[pos] if pos >= 0 else None,
-        })
-
-    tcrs = [
-        'ED5', 'ED8', 'ED9', 'ED10', 'ED21', 'ED23', 'ED28', 'ED40', 'ED46',
-        'ED45', 'ED39', 'ED33', 'ED31', 'ED16-1', 'ED16-30', 'OT1-Lena', 'OT1_PH'
-    ]
-
-    mdfs = []
-    for t in tcrs:
-        tdf = dfs[t]
-
-        mdf = tdf.head(-1)
-        mdf.loc[mdf['APL'] == 'N4 SIINFEKL', 'APL'] = len(apl_to_mutation)
-        mdf = mdf.merge(mdf['APL'].apply(apl_to_mutation_data))
-        mdf['tcr'] = t
-        mdfs.append(mdf[[
-            'Mean', 'mut_pos', 'mut_ami',
-            'epitope', 'tcr', 'orig_ami'
-        ]].rename(columns={
-            'Mean': 'activation'
-        }))
-
-    df = pd.concat(mdfs)
-
-    # compute residual
-    df = df.merge(
-        # wild-type activation for each tcr
-        df.query('mut_pos < 0')[[
-            'tcr', 'activation'
-        ]].rename(columns={
-            'activation': 'wild_activation'
-        }),
-        on='tcr'
-    )
-    df['residual'] = df['activation'] - df['wild_activation']
-
-    # load CDR3
-    cdf = pd.read_excel(
-        '../data/Educated_repertoire_derived_TCRs_CDR3a_b_TCRa_b.xlsx'
-    )[[
-       'TCR', 'CDR3b', 'CDR3a'
-    ]].rename(columns={
-        'TCR': 'tcr', 'CDR3b': 'cdr3b', 'CDR3a': 'cdr3a'
-    })
-    cdf['tcr'] = cdf['tcr'].str.upper().str.replace('_', '-')
-
-    # CDR not provided for OT1-Lena and OT1_PH
-    df = df.merge(cdf, how='outer')
-
-    return df
-
-#%% full dataset
 
 def read_fasta(fname):
     with open(fname) as f:
@@ -161,22 +31,161 @@ def read_fasta(fname):
     return prots
 
 
-def get_dataset():
-    df = pd.concat([
-        get_old_dataset(),
-        get_new_dataset(),
-    ])
+def get_cdr_sequences():
+    # naive repertoire
+    ntdf = pd.read_csv(
+        '../data/naive repertoire SIINFEKL APL landscape data V2 TCR INFO.csv'
+    )
+    ntdf['tcr'] = ntdf['sample id (TCR)'].apply(
+        lambda s: s.split('_')[3] if '_' in s else s.replace('-', '')
+    )
 
+    ntdf = ntdf.rename(columns={
+        'CDR3α': 'cdr3a',
+        'CDR3β': 'cdr3b'
+    })[['tcr', 'cdr3a', 'cdr3b']]
+
+    # educated repertoire
+    etdf = pd.read_excel(
+        '../data/Educated_repertoire_derived_TCRs_CDR3a_b_TCRa_b.xlsx'
+    )[[
+        'TCR', 'CDR3b', 'CDR3a'
+    ]].rename(columns={
+        'TCR': 'tcr', 'CDR3b': 'cdr3b', 'CDR3a': 'cdr3a'
+    })
+    etdf['tcr'] = etdf['tcr'].str.upper()
+
+    # alignment
     cadf = pd.DataFrame(read_fasta('../data/cdr3a-aligned.fasta').items(),
                         columns=['tcr', 'cdr3a_aligned'])
 
     cbdf = pd.DataFrame(read_fasta('../data/cdr3b-aligned.fasta').items(),
                         columns=['tcr', 'cdr3b_aligned'])
 
-    return df.merge(cadf, how='outer').merge(cbdf, how='outer')
+    # merge and return
+    tdf = pd.concat([ntdf, etdf]).merge(cadf, how='outer').merge(cbdf, how='outer')
+
+    # create copies for other OT1 with different names
+    # TODO check that these OT1 are actually all the same
+
+    tdf.loc[-1] = tdf.query('tcr=="OT1"').iloc[0]
+    tdf.loc[-1, 'tcr'] = 'OTI_PH'
+
+    tdf.loc[-2] = tdf.query('tcr=="OT1"').iloc[0]
+    tdf.loc[-2, 'tcr'] = 'LR_OTI_1'
+
+    tdf.loc[-3] = tdf.query('tcr=="OT1"').iloc[0]
+    tdf.loc[-3, 'tcr'] = 'LR_OTI_2'
+
+    return tdf.reset_index(drop=True)
 
 
-#%% amino acid features
+def get_dataset(educated_repertoire=None, normalization=None):
+    if educated_repertoire is None:
+        return pd.concat([
+            get_dataset(educated_repertoire=True, normalization=normalization),
+            get_dataset(educated_repertoire=False, normalization=normalization),
+        ]).reset_index(drop=True)
+
+    if educated_repertoire:
+        fname = '../data/PH_data_educated_repertoire_and_OTI.xlsx'
+    else:
+        fname = '../data/LR_data_naive_repertoire_and_OTI.xlsx'
+
+    if normalization is None:
+        sheet = 'Unnormalized Data'
+    elif normalization == 'AS':
+        sheet = 'Normalized to initial AS'
+    elif normalization == 'OT1':
+        sheet = 'Normalized to internal OTI'
+    else:
+        raise ValueError('unknown normalization')
+
+    df = pd.read_excel(fname, sheet)
+
+    # unpack the columns into each tcr
+    dds = []
+    for i in range(0, len(df.columns), 4):
+        d = df.iloc[:, [i, i + 3]].copy()
+        d.columns = ['apl', 'activation']
+        d['tcr'] = df.columns[i].upper()
+        dds.append(d)
+    df = pd.concat(dds)
+
+    # convert apl to mutation position and amino acid
+    apl_to_mut = {
+        i + 1: (p, a)
+        for i, (p, a) in enumerate([
+            (p, a)
+            for p in range(8)
+            for a in 'ACDEFGHIKLMNPQRSTVWY'
+            if a != 'SIINFEKL'[p]
+        ])
+    }
+
+    apl_to_epi = {
+        i: ''.join(
+            b if j != p else a
+            for j, b in enumerate('SIINFEKL')
+        )
+        for i, (p, a) in apl_to_mut.items()
+    }
+
+    df['mut_pos'] = df['apl'].apply(lambda x: apl_to_mut[x][0] if x in apl_to_mut else -1)
+    df['mut_ami'] = df['apl'].apply(lambda x: apl_to_mut[x][1] if x in apl_to_mut else None)
+    df['orig_ami'] = df['mut_pos'].apply(lambda x: 'SIINFEKL'[x])
+    df['epitope'] = df['apl'].apply(lambda x: apl_to_epi.get(x, 'SIINFEKL'))
+    df = df.drop(columns='apl')
+
+    # add cdr sequences
+    df = df.merge(get_cdr_sequences(), on='tcr', how='left')
+
+    # compute residual
+    df = df.merge(
+        # wild-type activation for each tcr
+        df.query('mut_pos < 0')[[
+            'tcr', 'activation'
+        ]].rename(columns={
+            'activation': 'wild_activation'
+        }),
+        on='tcr'
+    )
+    df['residual'] = df['activation'] - df['wild_activation']
+
+    df['normalization'] = normalization or 'none'
+
+    return df.reset_index(drop=True)
+
+
+def get_complete_dataset():
+    dfs = []
+
+    for edu in [True, False]:
+        for norm in [None, 'AS', 'OT1']:
+            df = get_dataset(edu, norm)
+            df['is_educated'] = edu
+            dfs.append(df)
+
+    return pd.concat(dfs).reset_index(drop=True)
+
+
+def add_activation_thresholds(df, key='is_activated', remove_constant=True):
+    ds = []
+    for _, g in df.groupby('normalization'):
+        for thr in [15, 46.9, 66.8]:
+            g['threshold'] = str(thr)
+            g[key] = g['activation'] > thr
+            ds.append(g.copy())
+
+    res = pd.concat(ds)
+    return res.groupby([
+        'tcr', 'normalization', 'threshold'
+    ]).filter(
+        lambda g: 0 < g[key].sum() < len(g)
+    ).reset_index(drop=True) if remove_constant else res.reset_index(drop=True)
+
+
+# %% amino acid features
 def get_aa_factors_2():
     # table 1 in 10.1007/s00894-001-0058-5
     table = '''A 0.008 0.134 –0.475 –0.039 0.181
@@ -250,6 +259,7 @@ def get_aa_factors():
 
     return aa_facs
 
+
 def get_aa_blosum():
     blosum_str = '''#  Matrix made by matblas from blosum62.iij
 #  * column uses minimum score
@@ -285,7 +295,8 @@ V  0 -3 -3 -3 -1 -2 -2 -3 -3  3  1 -2  1 -1 -2 -2  0 -3 -1'''
     for row in blosum_str.split('\n'):
         if row.startswith('#'):
             continue
-        elif aminos is None:
+
+        if aminos is None:
             aminos = row.split()
         else:
             a, *scores = row.split()
@@ -297,6 +308,7 @@ V  0 -3 -3 -3 -1 -2 -2 -3 -3  3  1 -2  1 -1 -2 -2  0 -3 -1'''
     bs = bs.set_index(['feature_category', 'feature']).T
 
     return bs
+
 
 def get_aa_chem():
     # https://en.wikipedia.org/wiki/Amino_acid
@@ -363,167 +375,62 @@ def get_aa_features():
         get_aa_1hot()
     ], axis=1)
 
+    # add additional row for alignment gaps
+    fs['one_hot', 'is_gap'] = 0
+    fs.loc['-'] = pd.Series(
+        [0] * len(fs.columns),
+        index=fs.columns
+    )
+    fs.loc['-', ('one_hot', 'is_gap')] = 1
+
     return fs
 
-#%% feature extraction
-
-def fix_column_names(df, prefix=None):
-     # ideally we would do this with a multi index
-    df.columns = [
-        '$'.join(map(str, x)) if isinstance(x, tuple) else str(x)
-        for x in df.columns
-    ]
-    if prefix:
-        df.columns = [f'{prefix}${c}' for c in df.columns]
-    return df
+# %% feature extraction
 
 
-def get_orig_props(fit_data, aa_features, name='orig_props'):
-    # properties of the original amino acid
-    res = fit_data['orig_ami'].apply(
-        lambda x: aa_features.loc[x, ['factors', 'blosum', 'chem']]
-    )
-    return fix_column_names(res, name)
+class FeatureMaker:
+    # feature names are taken from the *first* complete sample
+    def __init__(self):
+        self._names = []
+        self._samples = []
+        self._n_feats = None
 
+    def new_sample(self):
+        if len(self._samples) == 1:
+            self._n_feats = len(self._samples[0])
+            assert len(self._samples[0]) == len(self._names)
+        elif len(self._samples) >= 1:
+            assert len(self._samples[-1]) == self._n_feats
 
-def get_mutated_props(fit_data, aa_features, name='mutated_props'):
-    # properties of the mutated amino acid
-    res = fit_data['mut_ami'].apply(
-        lambda x: aa_features.loc[x, ['factors', 'blosum', 'chem']]
-    )
-    return fix_column_names(res, name)
+        self._samples.append([])
 
+    def add_sample_features(self, name, value):
+        add_to_names = self._n_feats is None
+        if isinstance(value, pd.Series):
+            self._samples[-1].extend(value.tolist())
+            if add_to_names:
+                self._names.extend([
+                    name + '$' + (
+                        '$'.join(map(str, x)) if isinstance(x, (list, tuple))
+                        else str(x)
+                    )
+                    for x in value.index
+                ])
+        elif isinstance(value, (list, tuple)):
+            self._samples[-1].extend(value)
+            if add_to_names:
+                self._names.extend([f'{name}${i}' for i in range(len(value))])
+        else:
+            self._samples[-1].append(float(value))
+            if add_to_names:
+                self._names.append(name)
 
-def get_diff_props(fit_data, aa_features, name='diff_props'):
-    # difference between properties of the mutated and original amino acids
-    mut_ps = get_mutated_props(fit_data, aa_features, name)
-    orig_ps = get_orig_props(fit_data, aa_features, name)
-    res = mut_ps - orig_ps
-    return fix_column_names(res, name)
-
-
-def get_seq_props(fit_data, aa_features, name='seq_props'):
-    # properties of all amino acids in the sequence
-    res = fit_data['epitope'].apply(
-        lambda s: pd.Series(pd.concat([
-            aa_features.loc[
-                a, ['factors', 'blosum', 'chem']
-            ] for a in s.strip()
-        ], axis=1).values.flatten())
-    )
-    return fix_column_names(res, name)
-
-
-def get_seq_1hot(fit_data, aa_features, name='seq_1hot'):
-    # one-hot encoding of all amino acids in the sequence
-    res = fit_data['epitope'].apply(
-        lambda s: pd.Series(pd.concat([
-            aa_features.loc[a, 'one_hot'] for a in s.strip()
-        ], axis=1).values.flatten())
-    )
-    return fix_column_names(res, name)
-
-
-def get_seq_diff_props(fit_data, aa_features, name='seq_diff_props'):
-    # difference between properties of all amino acids in
-    # the mutated and original sequence
-
-    mut_ps = get_seq_props(fit_data, aa_features, name)
-    wild_ps = pd.concat([
-        aa_features.loc[
-            a, ['factors', 'blosum', 'chem']
-        ] for a in 'SIINFEKL' # FIXME hardcoded wild type
-    ], axis=1).values.flatten()
-
-    res = mut_ps - wild_ps
-    return res
-
-
-def get_features(
-    fit_data,
-    aa_features,
-    use_orig_props: bool,
-    use_mutated_props: bool,
-    use_diff_props: bool,
-    use_sequence_1hot: bool,
-    use_sequence_props: bool,
-    use_sequence_diff: bool,
-):
-    feats = [
-        # mutated position
-        fit_data['mut_pos'],
-
-        # one-hot for mutated amino acid
-        fit_data['mut_ami'].apply(lambda x: aa_features.loc[x, 'one_hot']),
-
-        # one-hot for original amino acid
-        fit_data['orig_ami'].apply(lambda x: aa_features.loc[x, 'one_hot']),
-    ]
-
-    if use_orig_props:
-        feats.append(get_orig_props(fit_data, aa_features))
-
-    if use_mutated_props:
-        feats.append(get_mutated_props(fit_data, aa_features))
-
-    if use_diff_props:
-        feats.append(get_diff_props(fit_data, aa_features))
-
-    if use_sequence_1hot:
-        feats.append(get_seq_1hot(fit_data, aa_features))
-
-    if use_sequence_props:
-        feats.append(get_seq_props(fit_data, aa_features))
-
-    if use_sequence_diff:
-        feats.append(get_seq_diff_props(fit_data, aa_features))
-
-    res = pd.concat(feats, axis=1)
-
-    return res
+    def get_dataset(self):
+        return pd.DataFrame(self._samples, columns=self._names)
 
 
 def full_aa_features(fit_data, aa_features, interactions=False,
                      include_tcr=False):
-
-    class FeatureMaker:
-        def __init__(self):
-            self._names = []
-            self._samples = []
-            self._n_feats = None
-
-        def new_sample(self):
-            if len(self._samples) == 1:
-                self._n_feats = len(self._samples[0])
-                assert len(self._samples[0]) == len(self._names)
-            elif len(self._samples) >= 1:
-                assert len(self._samples[-1]) == self._n_feats
-
-            self._samples.append([])
-
-        def add_sample_features(self, name, value):
-            add_to_names = self._n_feats is None
-            if isinstance(value, pd.Series):
-                self._samples[-1].extend(value.tolist())
-                if add_to_names:
-                    self._names.extend([
-                        name + '$' + (
-                            '$'.join(map(str, x)) if isinstance(x, (list, tuple))
-                            else str(x)
-                        )
-                        for x in value.index
-                    ])
-            elif isinstance(value, (list, tuple)):
-                self._samples[-1].extend(value)
-                if add_to_names:
-                    self._names.extend([name] * len(value))
-            else:
-                self._samples[-1].append(float(value))
-                if add_to_names:
-                    self._names.append(name)
-
-        def get_dataset(self):
-            return pd.DataFrame(self._samples, columns=self._names)
 
     fs = aa_features
     if interactions:
@@ -531,7 +438,7 @@ def full_aa_features(fit_data, aa_features, interactions=False,
         fs = pd.DataFrame(pf, index=aa_features.index)
 
     feats = FeatureMaker()
-    for i, row in fit_data.iterrows():
+    for _, row in fit_data.iterrows():
         feats.new_sample()
 
         # mutation data
@@ -544,31 +451,69 @@ def full_aa_features(fit_data, aa_features, interactions=False,
             feats.add_sample_features(f'epi_{i}', fs.loc[a])
 
         # wild type
-        for i, a in enumerate('SIINFEKL'):  # FIXME hardcoded wild type
+        for i, a in enumerate('SIINFEKL'):
             feats.add_sample_features(f'wild_{i}', fs.loc[a])
 
         # difference between the two
         for i, (a1, a2) in enumerate(zip('SIINFEKL', row['epitope'].strip())):
-            feats.add_sample_features( f'diff_{i}', fs.loc[a1] - fs.loc[a2])
+            feats.add_sample_features(f'diff_{i}', fs.loc[a1] - fs.loc[a2])
 
         # aligned TCRs
         if include_tcr:
             for i, a in enumerate(row['cdr3a_aligned'].strip()):
-                if a == '-':
-                    feats.add_sample_features(
-                        f'cdr3a_{i}$empty', [-1] * len(fs.columns)
-                    )
-                else:
-                    feats.add_sample_features(f'cdr3a_{i}', fs.loc[a])
+                feats.add_sample_features(f'cdr3a_{i}', fs.loc[a])
 
             for i, a in enumerate(row['cdr3b_aligned'].strip()):
-                if a == '-':
-                    feats.add_sample_features(
-                        f'cdr3b_{i}$empty', [-1] * len(fs.columns)
-                    )
-                else:
-                    feats.add_sample_features(f'cdr3b_{i}', fs.loc[a])
+                feats.add_sample_features(f'cdr3b_{i}', fs.loc[a])
 
     res = feats.get_dataset()
+    res.index = fit_data.index
+
+    # remove constant columns
+    res = res.loc[:, res.std(axis=0) > 1e-6]
+    return res
+
+
+# %% grouping
+
+def build_feature_groups(columns):
+    groups = set([c.split('$')[0] for c in columns])
+    feature_groups = {'all': []}
+
+    for i in range(8):
+        feature_groups[f'pos_{i}'] = [f'wild_{i}', f'epi_{i}', f'diff_{i}']
+        groups.difference_update(feature_groups[f'pos_{i}'])
+
+    for g in groups:
+        feature_groups[g] = [g]
+
+    feature_groups['cdr3'] = [c for c in columns if c.startswith('cdr3')]
+    feature_groups['cdr3a'] = [c for c in columns if c.startswith('cdr3a')]
+    feature_groups['cdr3b'] = [c for c in columns if c.startswith('cdr3b')]
+
+    return feature_groups
+
+
+def decorrelate_groups(fit_data, groups, keep_var=0.99):
+    # applies pca independently to the features in each group
+    # and only keeps the top N pc so that the total variance is
+    # as indicated
+    all_reduced = []
+    for g, cs in groups.items():
+        if g == 'all':
+            continue
+
+        keep_columns = [c for c in fit_data.columns if c.split('$')[0] in cs]
+        data = fit_data[keep_columns]
+
+        pca = PCA().fit(data)
+        n = np.sum(np.cumsum(pca.explained_variance_ratio_) <= keep_var)
+        if n > 0:
+            all_reduced.append(pd.DataFrame(
+                pca.transform(data)[:, :n],
+                columns=[f'{g}${i}' for i in range(n)]
+            ))
+
+    res = pd.concat(all_reduced, axis=1)
     res.index = fit_data.index
     return res
