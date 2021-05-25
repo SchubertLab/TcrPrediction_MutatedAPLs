@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 # this runs a tcr-specific random forest to classify whether
 # a tcr is activated following a certain mutation
+# tries all possible combinations of normalization and threshold
 
 import os
 import sys
@@ -35,7 +36,7 @@ def masked_groupby(df, cols):
 
 
 def tcr_specific_model_classification():
-    df = add_activation_thr2esholds(get_complete_dataset())
+    df = add_activation_thresholds(get_complete_dataset())
     data = df[(
         df['mut_pos'] >= 0
     ) & (
