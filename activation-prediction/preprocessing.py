@@ -430,7 +430,8 @@ class FeatureMaker:
 
 
 def full_aa_features(fit_data, aa_features, interactions=False,
-                     include_tcr=False):
+                     include_tcr=False, include_mutation=True,
+                     remove_constant=False):
 
     fs = aa_features
     if interactions:
@@ -442,9 +443,10 @@ def full_aa_features(fit_data, aa_features, interactions=False,
         feats.new_sample()
 
         # mutation data
-        feats.add_sample_features('mut_pos', row['mut_pos'])
-        feats.add_sample_features('mut_ami', fs.loc[row['mut_ami']])
-        feats.add_sample_features('orig_ami', fs.loc[row['orig_ami']])
+        if include_mutation:
+            feats.add_sample_features('mut_pos', row['mut_pos'])
+            feats.add_sample_features('mut_ami', fs.loc[row['mut_ami']])
+            feats.add_sample_features('orig_ami', fs.loc[row['orig_ami']])
 
         # whole epitope
         for i, a in enumerate(row['epitope'].strip()):
@@ -470,7 +472,9 @@ def full_aa_features(fit_data, aa_features, interactions=False,
     res.index = fit_data.index
 
     # remove constant columns
-    res = res.loc[:, res.std(axis=0) > 1e-6]
+    if remove_constant:
+        res = res.loc[:, res.std(axis=0) > 1e-6]
+
     return res
 
 
