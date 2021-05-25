@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-# runs regression specific to each TCR separately model with increasingly small datasets
+# runs regression and classification TCR-specific models with increasingly small datasets
 
 import os
 import sys
@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from sklearn import metrics
-from sklearn.ensemble import RandomForestRegressor
+from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
 from sklearn.model_selection import KFold, ShuffleSplit
 from tqdm import tqdm
 
@@ -39,23 +39,35 @@ def tcr_specific_model(
                 xtrain = fit_data.iloc[train_idx]
                 xtest = fit_data.iloc[test_idx]
 
-                ytrain = data.loc[fit_mask, 'residual'].iloc[train_idx]
-
-                clf = RandomForestRegressor(
+                # regression
+                yres = data.loc[fit_mask, 'residual'].iloc[train_idx]
+                rfreg = RandomForestRegressor(
                     n_jobs=n_jobs,
                     n_estimators=250,
                     max_features='sqrt',
                     criterion='mae',
-                ).fit(xtrain, ytrain)
-                test_preds = clf.predict(xtest)
+                ).fit(xtrain, yres)
+                res_pred = rfreg.predict(xtest)
+                
+                # classification
+                yact = data.loc[fit_mask, 'is_activated'].iloc[train_idx]
+                act_pred = None
+                if yact.min() != yact.max():
+                    rfcls = RandomForestClassifier(
+                        n_jobs=n_jobs,
+                        n_estimators=250,
+                        max_features='sqrt',
+                    ).fit(xtrain, yact)
+                    act_pred = rfcls.predict_proba(xtest)[:, 1]
 
                 # save performance
                 pdf = data[fit_mask].iloc[test_idx][[
                     'tcr', 'normalization', 'mut_pos', 'mut_ami',
-                    'residual', 'wild_activation'
+                    'residual', 'wild_activation', 'is_activated'
                 ]]
                 pdf['fold'] = i
-                pdf['pred_res'] = test_preds
+                pdf['pred_res'] = res_pred
+                pdf['pred_prob'] = act_pred
                 perf.append(pdf)
 
     # aggregate performance data
@@ -97,10 +109,21 @@ def split_leave_r_out(test_size, n_splits):
     return split
 
 
-fname = 'results/tcr_specific_regression_performance.csv.gz'
+fname = 'results/tcr_specific_data_size.csv.gz'
 if not os.path.exists(fname):
     print('computing results for the first time')
     data = get_dataset(normalization='AS').query('mut_pos >= 0')
+    data['is_activated'] = data['activation'] > 46.9
+    data = data[(
+        data['mut_pos'] >= 0
+    ) & data['tcr'].isin(
+        set(
+            data.query('is_activated')['tcr'].unique()
+        ) & set(
+            data.query('~is_activated')['tcr'].unique()
+        )
+    )]
+    
     aa_features = get_aa_features()
     train_data = full_aa_features(data, aa_features)
 
@@ -133,6 +156,11 @@ def compute_metrics(g):
         'R2': metrics.r2_score(g['act'], g['pred']),
         'Pearson': g['act'].corr(g['pred'], method='pearson'),
         'Spearman': g['act'].corr(g['pred'], method='spearman'),
+        'AUC': (
+            metrics.roc_auc_score(g['is_activated'], g['pred_prob'])
+            if np.isfinite(g['pred_prob']).all() and 0 < g['is_activated'].mean() < 1
+            else np.nan
+        ),
     })
 
 
@@ -152,7 +180,7 @@ mdf['features'] = mdf['features'].str.upper()
 
 lmdf = mdf.melt(
     id_vars=['tcr', 'features', 'normalization', 'fold'],
-    value_vars=['R2', 'Pearson', 'Spearman', 'MAE'],
+    value_vars=['R2', 'Pearson', 'Spearman', 'MAE', 'AUC'],
     var_name='Metric'
 ).rename(
     columns={'features': 'Split', 'value': 'Value'}
@@ -161,29 +189,7 @@ lmdf = mdf.melt(
 lmdf['Is Educated'] = np.where(lmdf['tcr'].str.startswith('ED'), 'Yes', 'No')
 ppdf['Is Educated'] = np.where(ppdf['tcr'].str.startswith('ED'), 'Yes', 'No')
 
-# print('average metrics on validation folds by tcr and features')
-# print(lmdf.groupby([
-#     'tcr', 'Split', 'normalization', 'Metric'
-# ]).agg({'Value': 'mean'}).reset_index().pivot(
-#     index=['tcr', 'normalization', 'Split'],
-#     columns='Metric',
-#     values='Value'
-# ))
-
-
-print('Spearman values')
-print(lmdf.query(
-    'normalization == "AS" & Metric == "Spearman" & Split == "LMO"'
-).groupby('Is Educated')['Value'].apply(lambda g: g.describe()))
-
-#%%
-
-print(lmdf.query(
-    'normalization == "AS" & Metric == "Spearman"'
-).groupby(['Is Educated', 'Split']).agg({'Value': ['median', 'std']}))
-
 # %% plot metrics for all tcrs together by split
-
 g = sns.catplot(
     data=lmdf.query('normalization == "AS"'),
     x='Split', y='Value', col='Metric', row='normalization',
@@ -204,9 +210,10 @@ g.savefig('figures/validation-metrics-by-split-together.png', dpi=300)
 # %% plot spearman for all TCRs by split
 
 g = sns.catplot(
-    data=lmdf.query('Metric=="Spearman"'),
+    data=lmdf.query('Metric=="Spearman" | Metric=="AUC"'),
     x='Split', y='Value', col='Metric', hue='Is Educated',
     hue_order=['Yes', 'No'],
+    kind='box',
     sharey=False, #order=[o.upper() for o in order], kind='box',
     ci='sd', height=3.5, aspect=1.25,
 )
