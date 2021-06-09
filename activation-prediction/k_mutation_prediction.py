@@ -93,7 +93,7 @@ def k_mutation_prediction(k=2):
     return pdf
 
 
-fname = 'results/k_mutation_predictions.csv.gz'
+fname = 'results/double_mutation_predictions.csv.gz'
 if not os.path.exists(fname):
     print('computing results for the first time')
     pdf = k_mutation_prediction(k=2)
@@ -162,7 +162,8 @@ def make_plot(g):
 
 plt.figure(figsize=(8 * 2, 8 * 2))
 cmap = plt.get_cmap('inferno')
-for i, ((p1, p2), g) in enumerate(pdf.query('tcr == "ED5" & mutations == 2').groupby(['mut1_pos', 'mut2_pos'])):
+ms = pdf.query('tcr == "ED5" & mutations == 2').groupby(['mut1_pos', 'mut2_pos'])
+for i, ((p1, p2), g) in enumerate(ms):
     plt.subplot(8, 8, 8 * p1 + p2 + 1)
     make_plot(g)
 
@@ -189,8 +190,8 @@ apl1 = pdf[(
     ~pdf['mut1_apl'].isna()
 ) & (
     pdf['mutations'] == 1
-)][['tcr', 'mut1_apl', 'pred', 'pred_act']]
-
+)][['tcr', 'mut1_apl', 'pred', 'pred_act', 'is_activated']]
+ 
 apl2 = pdf.query('mutations == 2')[['tcr', 'mut1_apl', 'mut2_apl', 'pred', 'pred_act']]
 
 # symmetrize APL predictions (we only predicted APL1-APL2 but not APL2-APL1,
@@ -210,14 +211,16 @@ a12df = apl1.merge(
     'mut1_apl_x': 'mut1_apl',
     'pred_act_x': 'apl1_pred_act',
     'pred_x': 'apl1_pred',
+    'is_activated_x': 'apl1_is_activated',
     'mut1_apl_y': 'mut2_apl',
     'pred_act_y': 'apl2_pred_act',
     'pred_y': 'apl2_pred',
+    'is_activated_y': 'apl2_is_activated',
 }).merge(
     # compare predictions for individual APLs with coupled prediction
     apl2, on=['tcr', 'mut1_apl', 'mut2_apl']
 )
-    
+
 xdf = a12df.groupby([
     'tcr', 'apl1_pred_act', 'apl2_pred_act'
 ])[['apl1_pred', 'apl2_pred', 'pred']].agg('mean').reset_index()
@@ -254,3 +257,18 @@ print(
         'pred': '2-APL Prob.'
     })
 )
+        
+#%%
+
+for tcr in ['ED10', 'B13', 'ED40']:
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(3, 7.5))
+    fig.suptitle(tcr)
+    a12df[a12df['tcr'] == tcr].plot.scatter(
+        'apl1_pred', 'apl2_pred', c='pred', cmap='bwr', ax=ax1,
+    )
+    a12df[a12df['tcr'] == tcr].plot.scatter(
+        'mut1_apl', 'mut2_apl', c='pred', cmap='bwr', ax=ax2
+    )
+    
+    plt.tight_layout()
+    plt.savefig(f'figures/double_mutation_{tcr}_detail.pdf', bbox_inches='tight')
