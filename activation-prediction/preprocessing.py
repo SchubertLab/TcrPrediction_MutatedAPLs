@@ -31,7 +31,7 @@ def read_fasta(fname):
     return prots
 
 
-def get_cdr_sequences():
+def get_cdr_sequences(alignment_type='muscle'):
     # naive repertoire
     ntdf = pd.read_csv(
         '../data/naive repertoire SIINFEKL APL landscape data V2 TCR INFO.csv'
@@ -42,7 +42,7 @@ def get_cdr_sequences():
 
     ntdf = ntdf.rename(columns={
         'CDR3α': 'cdr3a',
-        'CDR3β': 'cdr3b'
+        'CDR3β': 'cdr3b',
     })[['tcr', 'cdr3a', 'cdr3b']]
 
     # educated repertoire
@@ -56,11 +56,20 @@ def get_cdr_sequences():
     etdf['tcr'] = etdf['tcr'].str.upper()
 
     # alignment
-    cadf = pd.DataFrame(read_fasta('../data/cdr3a-aligned.fasta').items(),
-                        columns=['tcr', 'cdr3a_aligned'])
-
-    cbdf = pd.DataFrame(read_fasta('../data/cdr3b-aligned.fasta').items(),
-                        columns=['tcr', 'cdr3b_aligned'])
+    if alignment_type == 'muscle':
+        cadf = pd.DataFrame(read_fasta('../data/cdr3a-aligned.fasta').items(),
+                            columns=['tcr', 'cdr3a_aligned'])
+    
+        cbdf = pd.DataFrame(read_fasta('../data/cdr3b-aligned.fasta').items(),
+                            columns=['tcr', 'cdr3b_aligned'])
+    elif alignment_type == 'imgt':
+        cadf = pd.DataFrame(read_fasta('../data/cdr3a-aligned-imgt.fasta').items(),
+                            columns=['tcr', 'cdr3a_aligned'])
+    
+        cbdf = pd.DataFrame(read_fasta('../data/cdr3b-aligned-imgt.fasta').items(),
+                            columns=['tcr', 'cdr3b_aligned'])
+    else:
+        raise ValueError('unknown CDR3 alignment (valid choices: muscle, imgt)')
 
     # merge and return
     tdf = pd.concat([ntdf, etdf]).merge(cadf, how='outer').merge(cbdf, how='outer')
@@ -80,11 +89,12 @@ def get_cdr_sequences():
     return tdf.reset_index(drop=True)
 
 
-def get_dataset(educated_repertoire=None, normalization=None):
+def get_dataset(educated_repertoire=None, normalization=None,
+                cdr3_alignment_type='muscle'):
     if educated_repertoire is None:
         return pd.concat([
-            get_dataset(educated_repertoire=True, normalization=normalization),
-            get_dataset(educated_repertoire=False, normalization=normalization),
+            get_dataset(True, normalization, cdr3_alignment_type),
+            get_dataset(False, normalization, cdr3_alignment_type),
         ]).reset_index(drop=True)
 
     if educated_repertoire:
@@ -138,7 +148,7 @@ def get_dataset(educated_repertoire=None, normalization=None):
     df = df.drop(columns='apl')
 
     # add cdr sequences
-    df = df.merge(get_cdr_sequences(), on='tcr', how='left')
+    df = df.merge(get_cdr_sequences(cdr3_alignment_type), on='tcr', how='left')
 
     # compute residual
     df = df.merge(
