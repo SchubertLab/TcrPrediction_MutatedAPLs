@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from adjustText import adjust_text  # !pip install adjustText
+from scipy import stats
 from sklearn import metrics
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import KFold
@@ -43,33 +44,37 @@ def tcr_specific_model_classification():
         df['tcr'].isin(df.query('is_activated')['tcr'].unique())
     )]
     aa_features = get_aa_features()
-    train_data = full_aa_features(data, aa_features)
-    print('training on', train_data.shape[1], 'features')
 
     perf = []
     group_keys = ['normalization', 'threshold', 'tcr']
-    for _, fit_mask in tqdm(masked_groupby(data, group_keys)):
-        fit_data = train_data[fit_mask]
-
-        split = KFold(len(fit_data), shuffle=True).split(fit_data)
-        for i, (train_idx, test_idx) in enumerate(split):
-            xtrain = fit_data.iloc[train_idx]
-            xtest = fit_data.iloc[test_idx]
-
-            ytrain = data.loc[fit_mask, 'is_activated'].iloc[train_idx]
-
-            clf = RandomForestClassifier().fit(xtrain, ytrain)
-
-            test_preds = clf.predict_proba(xtest)
-            test_preds = test_preds[:, (1 if test_preds.shape[1] == 2 else 0)]
-
-            # save performance
-            pdf = data[fit_mask].iloc[test_idx][group_keys + [
-                'mut_pos', 'mut_ami', 'is_activated', 'wild_activation'
-            ]]
-            pdf['fold'] = i
-            pdf['pred'] = test_preds
-            perf.append(pdf)
+    for reduce_feats in [False, True]:
+        feats = aa_features if reduce_feats else aa_features[['factors']]
+        train_data = full_aa_features(data, feats)
+        print('training on', train_data.shape[1], 'features')
+        
+        for _, fit_mask in tqdm(masked_groupby(data, group_keys)):
+            fit_data = train_data[fit_mask]
+    
+            split = KFold(len(fit_data), shuffle=True).split(fit_data)
+            for i, (train_idx, test_idx) in enumerate(split):
+                xtrain = fit_data.iloc[train_idx]
+                xtest = fit_data.iloc[test_idx]
+    
+                ytrain = data.loc[fit_mask, 'is_activated'].iloc[train_idx]
+    
+                clf = RandomForestClassifier().fit(xtrain, ytrain)
+    
+                test_preds = clf.predict_proba(xtest)
+                test_preds = test_preds[:, (1 if test_preds.shape[1] == 2 else 0)]
+    
+                # save performance
+                pdf = data[fit_mask].iloc[test_idx][group_keys + [
+                    'mut_pos', 'mut_ami', 'is_activated', 'wild_activation'
+                ]]
+                pdf['fold'] = i
+                pdf['pred'] = test_preds
+                pdf['reduced_features'] = reduce_feats
+                perf.append(pdf)
 
     # aggregate performance data
     pdf = pd.concat(perf)
@@ -89,68 +94,58 @@ else:
 #%% comparing normalizations
 
 pp = pdf.groupby(
-    ['normalization', 'tcr', 'threshold'], as_index=False
+    ['reduced_features', 'normalization', 'tcr', 'threshold'], as_index=False
 ).apply(lambda q: pd.Series({
     'auc': metrics.roc_auc_score(q['is_activated'], q['pred']),
     'aps': metrics.average_precision_score(q['is_activated'], q['pred']),
-})).melt(['normalization', 'tcr', 'threshold']).pivot_table(
-    'value', ['tcr', 'threshold'], ['variable', 'normalization']
+})).melt(['reduced_features', 'normalization', 'tcr', 'threshold']).pivot_table(
+    'value', ['tcr', 'threshold', 'normalization', 'reduced_features'], 'variable'
+).reset_index()
+
+pp.loc[:, 'reduced_features'] = np.where(pp['reduced_features'], 'redux', 'full')
+
+    
+#%% are reduced features better?
+
+g = sns.catplot(
+    data=pp[(
+        (pp['normalization'] == 'AS') & (pp['threshold'] == 46.9)
+    ) | (
+        (pp['normalization'] == 'OT1') & (pp['threshold'] == 66.8)
+    ) | (
+        (pp['normalization'] == 'none') & (pp['threshold'] == 15)
+    )],
+    col='normalization',
+    x='reduced_features', y='auc',
+    dodge=True, kind='box', margin_titles=True,
+    height=3, aspect=0.5,
 )
 
+        
+def do_test(feats, auc, **kwargs):
+    x1 = auc[feats == 'redux']
+    x2 = auc[feats == 'full']
+    
+    r = stats.ttest_rel(x1, x2, alternative='greater')
+    
+    # bonferroni
+    ntests = 3
+    if r.pvalue < 0.05 / ntests:
+        sig = ' *'
+    elif r.pvalue < 0.01 / ntests:
+        sig = ' **'
+    elif r.pvalue < 0.001 / ntests:
+        sig = ' ***'
+    else:
+        sig = ''
+    
+    plt.text(0.05, 0.05, f'N = {len(x1)}\nt = {r.statistic:.3f}\np = {r.pvalue:.1e}{sig}',
+             backgroundcolor='#ffffff77',
+             transform=plt.gca().transAxes, va='bottom')
 
-adf = pp['auc'].reset_index()
-adf['is_educated'] = adf['tcr'].str.startswith('ED')
-print(adf.groupby('is_educated')['AS'].apply(lambda g: g.describe()))
+g.map(do_test, 'reduced_features', 'auc')
 
-
-#%% predicted probabilities
-g = sns.FacetGrid(
-    pdf.query('normalization=="AS" & threshold == 46.9'),
-    col='tcr', col_wrap=8, ylim=(0, 1), height=2
-)
-g.map(sns.stripplot,  'is_activated', 'pred', 'mut_pos',
-      order=[False, True], hue_order=range(8), palette='husl')
-g.map(sns.pointplot, 'is_activated', 'pred', color='C3', order=[False, True])
-for ax in g.axes:
-    plt.setp(ax.lines, zorder=100)
-    plt.setp(ax.collections, zorder=100, label="")
-g.add_legend()
-plt.savefig('figures/tcr_specific_activation_prediction_AS.pdf', dpi=192)
-
-#%% paired AUC comparison
-
-vs = ['AS', 'OT1', 'none']
-g = sns.pairplot(
-    data=pp['auc'].reset_index(),
-    hue='threshold', vars=vs, palette='tab10',
-)
-
-# annotate
-for i, row in enumerate(g.axes):
-    for j, ax in enumerate(row):
-        if i == j:
-            continue
-
-        ax.set_xlim(0.25, 1.1)
-        ax.set_ylim(0.25, 1.1)
-        ax.plot([0, 1], [0, 1], 'r--')
-
-        data_x = pp['auc'][vs[j]]
-        data_y = pp['auc'][vs[i]]
-
-        diff = (data_x - data_y).abs().dropna()
-        annot = diff > 0.15
-
-        txt = [
-            ax.text(data_x[tcr], data_y[tcr], tcr)
-            for tcr in diff[annot].index
-        ]
-
-        adjust_text(txt, arrowprops=dict(arrowstyle='-'), ax=ax)
-
-g.fig.suptitle('AUC comparison by normalization')
-g.tight_layout()
-g.fig.savefig('figures/tcr_specific_auc_by_norm.pdf', dpi=192)
+plt.savefig('figures/tcr_specific_feature_comparison.pdf', dpi=192)
 
 # %% separate roc curves
 
@@ -161,7 +156,7 @@ nrows = ntcrs // ncols + 1
 cm = plt.get_cmap('tab20c')
 
 plt.figure(figsize=(ncols * height, nrows * height))
-for i, (tcr, g) in enumerate(pdf.groupby('tcr')):
+for i, (tcr, g) in enumerate(pdf.query('reduced_features').groupby('tcr')):
     plt.subplot(nrows, ncols, i + 1)
 
     best = 0.0
@@ -197,7 +192,7 @@ plt.gcf().legend(*zip(*[
 
 plt.tight_layout()
 sns.despine()
-plt.savefig('figures/tcr_specific_activation_aucs.pdf', dpi=192)
+plt.savefig('figures/tcr_specific_activation_aucs_reduced_feats.pdf', dpi=192)
 
 
 # %% roc curves for AS / 46.9
@@ -208,7 +203,7 @@ height = 2
 nrows = ntcrs // ncols + 1
 
 plt.figure(figsize=(ncols * height, nrows * height))
-groups = pdf.query('normalization == "AS" & threshold == 46.9').groupby('tcr')
+groups = pdf.query('reduced_features & normalization == "AS" & threshold == 46.9').groupby('tcr')
 for i, (tcr, g) in enumerate(groups):
     plt.subplot(nrows, ncols, i + 1)
 
@@ -239,7 +234,7 @@ for i, (tcr, g) in enumerate(groups):
 
 plt.tight_layout()
 sns.despine()
-plt.savefig('figures/tcr_specific_activation_AS_auroc_auprc.pdf', dpi=192)
+plt.savefig('figures/tcr_specific_activation_AS_auroc_auprc_reduced_features.pdf', dpi=192)
 
 
 #%% comparing thresholds and normalizations
@@ -264,7 +259,7 @@ def classification_metrics(g):
     })
 
 
-adf = pdf.groupby([
+adf = pdf.query('reduced_features').groupby([
     'normalization', 'threshold', 'tcr'
 ]).apply(
     classification_metrics
@@ -293,4 +288,4 @@ def annot(x, y, color, data):
 
 g.map_dataframe(annot, 'threshold', 'value')
 
-plt.savefig('figures/tcr_specific_thr_vs_norm.pdf', dpi=192)
+plt.savefig('figures/tcr_specific_thr_vs_norm_reduced_features.pdf', dpi=192)
