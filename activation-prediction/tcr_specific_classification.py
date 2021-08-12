@@ -51,22 +51,25 @@ def tcr_specific_model_classification():
         feats = aa_features if reduce_feats else aa_features[['factors']]
         train_data = full_aa_features(data, feats)
         print('training on', train_data.shape[1], 'features')
-        
+
         for _, fit_mask in tqdm(masked_groupby(data, group_keys)):
             fit_data = train_data[fit_mask]
-    
+
             split = KFold(len(fit_data), shuffle=True).split(fit_data)
             for i, (train_idx, test_idx) in enumerate(split):
                 xtrain = fit_data.iloc[train_idx]
                 xtest = fit_data.iloc[test_idx]
-    
+
                 ytrain = data.loc[fit_mask, 'is_activated'].iloc[train_idx]
-    
-                clf = RandomForestClassifier().fit(xtrain, ytrain)
-    
+
+                clf = RandomForestClassifier(
+                    n_estimators=250,
+                    max_features='sqrt',
+                ).fit(xtrain, ytrain)
+
                 test_preds = clf.predict_proba(xtest)
                 test_preds = test_preds[:, (1 if test_preds.shape[1] == 2 else 0)]
-    
+
                 # save performance
                 pdf = data[fit_mask].iloc[test_idx][group_keys + [
                     'mut_pos', 'mut_ami', 'is_activated', 'wild_activation'
@@ -138,15 +141,32 @@ def do_test(feats, auc, **kwargs):
         sig = ' ***'
     else:
         sig = ''
-    
-    plt.text(0.05, 0.05, f'N = {len(x1)}\nt = {r.statistic:.3f}\np = {r.pvalue:.1e}{sig}',
+
+    plt.text(0.075, 0.05, f'N = {len(x1)}\nt = {r.statistic:.3f}\np = {r.pvalue:.1e}{sig}',
              backgroundcolor='#ffffff77',
-             transform=plt.gca().transAxes, va='bottom')
+             transform=plt.gca().transAxes, va='bottom', ha='left')
 
 g.map(do_test, 'reduced_features', 'auc')
 
 plt.savefig('figures/tcr_specific_feature_comparison.pdf', dpi=192)
 
+#%% metrics for each position
+pdf.loc[:, 'educated'] = np.where(pdf['tcr'].str.startswith('ED'),
+                                  'educated', 'naive')
+sns.catplot(
+    data=pdf[(
+        pdf['normalization'] == 'AS'
+    ) & (
+        pdf['threshold'] == 46.9
+    ) & (
+        pdf['reduced_features']
+    )].groupby(['educated', 'tcr', 'mut_pos']).apply(lambda q: pd.Series({
+        'auc': metrics.average_precision_score(
+            q['is_activated'], q['pred']
+        ),
+    })).reset_index().dropna(),
+    x='mut_pos', y='auc', kind='box', hue='educated',
+)
 # %% separate roc curves
 
 ntcrs = len(pdf['tcr'].unique())
@@ -236,6 +256,65 @@ plt.tight_layout()
 sns.despine()
 plt.savefig('figures/tcr_specific_activation_AS_auroc_auprc_reduced_features.pdf', dpi=192)
 
+#%% roc curves AS/46.9 all together
+
+aucs = pp.query('reduced_features == "redux" & normalization == "AS" & threshold == 46.9')
+aucs.loc[:, 'repertoire'] = np.where(aucs['tcr'].str.startswith('ED'),
+                                     'educated', 'naive')
+
+worst_edu, worst_nai = aucs.set_index('tcr').groupby('repertoire')['auc'].idxmin()
+best_edu, best_nai = aucs.set_index('tcr').groupby('repertoire')['auc'].idxmax()
+
+fig, (ax, ax2) = plt.subplots(1, 2, figsize=(5, 3.5),
+                              gridspec_kw={'width_ratios': [3, 1.75]})
+cm = plt.get_cmap('tab20')
+groups = pdf.query('reduced_features & normalization == "AS" & threshold == 46.9').groupby('tcr')
+for i, (tcr, g) in enumerate(groups):
+    fpr, tpr, _ = metrics.roc_curve(g['is_activated'], g['pred'])
+    pre, rec, _ = metrics.precision_recall_curve(g['is_activated'], g['pred'])
+
+    auc = metrics.roc_auc_score(g['is_activated'], g['pred'])
+    aps = metrics.average_precision_score(g['is_activated'], g['pred'])
+
+    try:
+        idx = (best_edu, worst_edu, best_nai, worst_nai).index(tcr)
+        kwargs={
+            'c': f'C{idx // 2}',
+            'label': f'{tcr} ({aps:.3f})',
+            'linestyle': '--' if idx % 2 else '-',
+        }
+    except ValueError:
+        kwargs = {'c': 'gray', 'alpha': 0.3}
+
+    #ax.plot(fpr, tpr, **kwargs)
+    ax.plot(rec, pre, **kwargs)
+
+ax.legend(ncol=2, bbox_to_anchor=(0.5, 1.3), loc="upper center")
+
+ax.set_xlim(-0.1, 1.1)
+ax.set_ylim(-0.1, 1.1)
+
+#ax.set_ylabel('True Positive Rate')
+#ax.set_xlabel('False Positive Rate')
+
+ax.set_yticks([0, 0.5, 1])
+ax.set_ylabel('Precision')
+ax.set_xlabel('Recall')
+
+pp.loc[:, 'Repertoire'] = np.where(pp['tcr'].str.startswith('ED'),
+                                    'Educated', 'Naive')
+sns.boxplot(
+    data=pp.query('normalization == "AS" & threshold == 46.9 & reduced_features == "redux"'),
+    y='aps', x='Repertoire', ax=ax2
+)
+
+ax2.tick_params(axis='x', rotation=-20)
+ax2.set_ylabel('Average Precision Score')
+
+fig.tight_layout()
+sns.despine()
+
+plt.savefig('figures/tcr_specific_all_aucs_together.pdf', dpi=300)
 
 #%% comparing thresholds and normalizations
 
@@ -284,7 +363,8 @@ def annot(x, y, color, data):
         plt.text(['1', '4', '6'].index(str(thr)[0]), val, tcr)
         for tcr, thr, val in data.loc[mask, ['tcr', 'threshold', 'value']].values
     ]
-    adjust_text(txt, arrowprops=dict(arrowstyle='-'))
+    adjust_text(txt, x=data[x].values, y=data[y].values,
+                arrowprops=dict(arrowstyle='-'))
 
 g.map_dataframe(annot, 'threshold', 'value')
 

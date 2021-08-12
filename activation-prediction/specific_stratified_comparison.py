@@ -110,13 +110,20 @@ metrics_df = pd.concat([
     'tcr': 'TCR',
 })
 
-metrics_df['is_educated'] = metrics_df['TCR'].str.startswith('ED')
+metrics_df['is_educated'] = np.where(
+    metrics_df['TCR'].str.startswith('ED'),
+    'Educated', 'Naive'
+)
+metrics_df.loc[metrics_df['TCR'] == 'OT1', 'is_educated'] = 'OT1'
 
 #%%
-g = sns.FacetGrid(data=metrics_df, col='Metric', col_wrap=4,
-                  height=3, sharey=False, sharex=False)
+g = sns.FacetGrid(
+    data=metrics_df, col='Metric', col_wrap=4,
+    height=2, sharey=False, sharex=False,
+)
 g.map(sns.scatterplot, 'TCR-specific', 'TCR-stratified', 'is_educated')
 g.axes_dict['R2'].set(xlim=(0, 1), ylim=(0, 1))
+
 # add line on diagonal
 for ax in g.axes_dict.values():
     xmin, xmax = ax.get_xlim()
@@ -126,27 +133,25 @@ for ax in g.axes_dict.values():
     ax.plot([lb, ub], [lb, ub], 'r--')
 
 
-# from adjustText import adjust_text
-# def annot(x, y, color, data):
-#     err = np.abs(data[x] - data[y])
-#     t = sorted(err.values)[-5]
-#     mask = err >= t
+from adjustText import adjust_text
+def annot(x, y, color, data):
+    err = np.abs(data[x] - data[y])
+    t = sorted(err.values)[-5]
+    mask = err >= t
 
-#     xl, xu = plt.xlim()
-#     yl, yu = plt.ylim()
+    xl, xu = plt.xlim()
+    yl, yu = plt.ylim()
 
-#     txt = [
-#         plt.text(max(min(x, xu), xl),
-#                  max(min(y, yu), yl),
-#                  tcr)
-#         for tcr, x, y in data.loc[mask, ['TCR', x, y]].values
-#     ]
-#     adjust_text(txt, arrowprops=dict(arrowstyle='-'))
+    txt = [
+        plt.text(max(min(x, xu), xl), max(min(y, yu), yl), tcr)
+        for tcr, x, y in data.loc[mask, ['TCR', x, y]].values
+    ]
+    adjust_text(txt, arrowprops=dict(arrowstyle='-'))
 
-# g.map_dataframe(annot, 'TCR-specific', 'TCR-stratified')
+#g.map_dataframe(annot, 'TCR-specific', 'TCR-stratified')
 
-g.add_legend(title='Educated')
+g.add_legend()
 #g.tight_layout()
 g.set_titles(col_template="{col_name}")
-g.savefig('figures/all-metrics-specific-vs-stratified.pdf', dpi=192)
+g.savefig('figures/all-metrics-specific-vs-stratified.pdf', dpi=300)
 g.savefig('figures/all-metrics-specific-vs-stratified.png', dpi=300)

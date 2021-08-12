@@ -125,7 +125,7 @@ if not os.path.exists(fname):
     )]
     
     aa_features = get_aa_features()
-    train_data = full_aa_features(data, aa_features)
+    train_data = full_aa_features(data, aa_features[['factors']])
 
     ppdf = pd.concat([
         tcr_specific_model(
@@ -161,6 +161,11 @@ def compute_metrics(g):
             if np.isfinite(g['pred_prob']).all() and 0 < g['is_activated'].mean() < 1
             else np.nan
         ),
+        'APS': (
+            metrics.average_precision_score(g['is_activated'], g['pred_prob'])
+            if np.isfinite(g['pred_prob']).all()
+            else np.nan
+        ),
     })
 
 
@@ -180,47 +185,29 @@ mdf['features'] = mdf['features'].str.upper()
 
 lmdf = mdf.melt(
     id_vars=['tcr', 'features', 'normalization', 'fold'],
-    value_vars=['R2', 'Pearson', 'Spearman', 'MAE', 'AUC'],
+    value_vars=['R2', 'Pearson', 'Spearman', 'MAE', 'APS', 'AUC'],
     var_name='Metric'
 ).rename(
     columns={'features': 'Split', 'value': 'Value'}
 )
 
-lmdf['Is Educated'] = np.where(lmdf['tcr'].str.startswith('ED'), 'Yes', 'No')
-ppdf['Is Educated'] = np.where(ppdf['tcr'].str.startswith('ED'), 'Yes', 'No')
-
-# %% plot metrics for all tcrs together by split
-g = sns.catplot(
-    data=lmdf.query('normalization == "AS"'),
-    x='Split', y='Value', col='Metric', row='normalization',
-    hue='Is Educated',
-    sharey=False, #order=[o.upper() for o in order], kind='box',
-    ci='sd', height=3, margin_titles=True,
-)
-
-for k, ax in g.axes_dict.items():
-    ax.tick_params(axis='x', rotation=90)
-    if k[1] != 'MAE':
-        ax.set_ylim(-0.6, 1.1)
-g.set_titles(col_template="{col_name}")
-
-g.savefig('figures/validation-metrics-by-split-together.pdf', dpi=192)
-g.savefig('figures/validation-metrics-by-split-together.png', dpi=300)
+lmdf['Repertoire'] = np.where(lmdf['tcr'].str.startswith('ED'), 'Educated', 'Naive')
+ppdf['Repertoire'] = np.where(ppdf['tcr'].str.startswith('ED'), 'Educated', 'Naive')
 
 # %% plot spearman for all TCRs by split
-
 g = sns.catplot(
-    data=lmdf.query('Metric=="Spearman" | Metric=="AUC"'),
-    x='Split', y='Value', col='Metric', hue='Is Educated',
-    hue_order=['Yes', 'No'],
+    data=lmdf.query('Metric=="Spearman"'),
+    x='Split', y='Value', col='Metric', hue='Repertoire',
     kind='box',
     sharey=False, #order=[o.upper() for o in order], kind='box',
-    ci='sd', height=3.5, aspect=1.25,
+    ci='sd', height=3, aspect=1.25,
+    order=['LMO', 'L10O', 'L25O', 'L50O', 'LAO', 'L75O', 'L90O', 'L95O', 'LPO'],
+    legend=False,
 )
 for ax in g.axes_dict.values():
     ax.tick_params(axis='x', rotation=90)
 g.set_titles(col_template="{col_name}")
-
+g.add_legend(loc='lower left')
 g.savefig('figures/validation-spearman-by-split-together.pdf', dpi=192)
 g.savefig('figures/validation-spearman-by-split-together.png', dpi=300)
 
@@ -330,24 +317,34 @@ order = cc.query('variable=="Spearman"') \
     .index.to_list()
 
 g = sns.catplot(
-    data=cc,
+    data=cc[cc['Is Educated'] == 'Yes'].query('variable=="AUC"'),
     x='mut_pos',
     y='value',
     kind='box',
     dodge=True,
-    col='variable',
-    row='normalization',
-    hue='Is Educated',
+    #col='variable',
+    #row='normalization',
+    #hue='Is Educated',
     sharey=False,
-    margin_titles=True,
-    order=order,
-    height=3.5
+    #margin_titles=True,
+    order=range(8),
+    height=3.5,
+    palette='husl',
+    zorder=2,
+    showmeans=True,
+    notch=True,
+    meanprops={'mfc': 'k', 'mec': 'k'}
 )
 
-g.axes_dict['AS', 'R2'].set(ylim=(-0.25, 1))
-g.axes_dict['AS', 'Pearson'].set(ylim=(-0.25, 1))
-g.axes_dict['AS', 'Spearman'].set(ylim=(-0.25, 1))
-plt.savefig('figures/metrics-by-left-out-position.pdf', dpi=192)
+g.set(xticklabels=[f'P{i+1}' for i in range(8)],
+      xlabel='Validate on position',
+      ylabel='AUC for educated repertoire')
+#g.axes_dict['AS', 'R2'].set(ylim=(-0.25, 1))
+#g.axes_dict['AS', 'Pearson'].set(ylim=(-0.25, 1))
+#g.axes_dict['AS', 'Spearman'].set(ylim=(-0.25, 1))
+plt.tight_layout()
+plt.savefig('figures/metrics-by-left-out-position.pdf', dpi=300,
+            bbox_inches='tight')
 
 # %% regression lines for all lmo features and all tcrs
 order = ppdf.groupby('tcr') \

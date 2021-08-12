@@ -154,53 +154,25 @@ ddf = mdf.melt(['tcr', 'group']).merge(
 ddf['diff'] = ddf['value'] - ddf['base']
 ddf['rel'] = ddf['value'] / ddf['base'] - 1  # positive = increase
 ddf['item'] = ddf['group'].str.split('_').str[0]
-ddf['is_educated'] = ddf['tcr'].str.startswith('ED')
+ddf['is_educated'] = np.where(
+    ddf['tcr'].str.startswith('ED'),
+    'Educated', 'Naive'
+)
 
 #%%
 print(ddf.query(
     'variable == "auc" & is_educated'
 ).groupby('group')['value'].median().sort_values())
 
-
-#%% feature importance
+#%% feature importance for educated
 g = sns.catplot(
     data=ddf[(
+        ddf['is_educated'] == "Educated"
+    ) & (
         ddf['variable'] == 'auc'
     ) & (
         ddf['group'].str.startswith('pos_')
           | ddf['group'].isin(['cdr3', 'all'])
-    )],
-    col='is_educated',
-    x='group',
-    y='value',
-    sharey=True,
-    #ci='sd',
-    #dodge=True,
-    aspect=1,
-    height=5,
-    kind='box',
-    #hue='tcr',
-    palette='husl',
-    zorder=2,
-    showmeans=True,
-    notch=True,
-    meanprops={'mfc': 'k', 'mec': 'k'}
-)
-
-g.set(ylim=(0.5, 1))
-g.savefig('figures/permutation_feature_importance.pdf', dpi=192)
-g.savefig('figures/permutation_feature_importance.png', dpi=192)
-
-#%% importance for educated repertoire only
-
-
-g = sns.catplot(
-    data=ddf[(
-        ddf['variable'] == 'auc'
-    ) & (
-        ddf['group'].str.startswith('pos_') | ddf['group'].isin(['cdr3', 'all'])
-    ) & (
-        ddf['is_educated']
     )].rename(columns={
         'value': 'AUC', 'group': 'Permutation'
     }).replace({
@@ -213,8 +185,8 @@ g = sns.catplot(
     sharey=True,
     #ci='sd',
     #dodge=True,
-    aspect=1,
-    height=4,
+    aspect=1.25,
+    height=3,
     kind='box',
     #hue='tcr',
     palette='husl',
@@ -224,7 +196,9 @@ g = sns.catplot(
     meanprops={'mfc': 'k', 'mec': 'k'}
 )
 
-g.set(ylim=(0.5, 1), title='Feature Importance', ylabel='AUC for Educated Repertoire')
+g.set(ylim=(0.5, 1), ylabel='AUC on educated repertoire',
+      xlabel='Group permuted')
+
 g.savefig('figures/permutation_feature_importance_educated.pdf', dpi=192)
 g.savefig('figures/permutation_feature_importance_educated.png', dpi=192)
 

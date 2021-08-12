@@ -162,18 +162,28 @@ sns.catplot(
 )
 
 
-#%% boxplot
+#%% strip
 
 sns.catplot(
     data=edf,
-    x='cdr3_mutation_position', y='absdiff',
+    x='cdr3_mutation_position', y='diff',
     col='cdr3_mutation_chain', col_wrap=1,
-    kind='box', height=2.5, aspect=2,
+    kind='strip', height=2.5, aspect=2,
 )
 
-plt.savefig('figures/cdr3_all_positions.pdf')
+plt.savefig('figures/cdr3_all_positions_strip.pdf')
 
-#%% 
+#%% point
+sns.catplot(
+    data=edf,
+    x='cdr3_mutation_position', y='diff',
+    col='cdr3_mutation_chain', col_wrap=1,
+    ci='sd', kind='point', height=2.5, aspect=2,
+)
+
+plt.savefig('figures/cdr3_all_positions_point.pdf')
+
+#%%a chain effect for each cdr3 position based on epitope mutation
 
 tdf = edf.query(
     #'tcr=="ED5" & cdr3_mutation_chain == "a" & cdr3_mutation_position == 12'
@@ -181,26 +191,27 @@ tdf = edf.query(
     'cdr3_mutation_chain == "a"'    
 ).sort_values(['cdr3_mut', 'mut_pos', 'mut_ami'])
 
-g = sns.catplot(data=tdf,
-                x='mut_pos', y='diff', hue='tcr',
-                dodge=True, kind='point', ci=None,
-                col='cdr3_mutation_position',
-                col_order=tdf.groupby('cdr3_mutation_position')['diff'].agg('std').sort_values().index.tolist(),
-                col_wrap=4, height=2.5,
-                #col='tcr', col_wrap=8,
-                hue_order=tdf.groupby('tcr')['diff'].agg('mean').sort_values().index.tolist(),
-                )
+g = sns.catplot(
+    data=tdf,
+    x='mut_pos', y='diff', hue='tcr',
+    dodge=True, kind='point', ci=None,
+    col='cdr3_mutation_position',
+    col_order=tdf.groupby('cdr3_mutation_position')['diff'].agg('std').sort_values().index.tolist(),
+    col_wrap=4, height=2.5,
+    #col='tcr', col_wrap=8,
+    hue_order=tdf.groupby('tcr')['diff'].agg('mean').sort_values().index.tolist(),
+)
 
 
 #%% two positions with largest variation for each chain
 edf['cdr3_mut_loc'] = edf['cdr3_mutation_chain'].str.cat(edf['cdr3_mutation_position'].astype(str))
 locs = edf.groupby('cdr3_mut_loc')['diff'].agg('std').sort_values().tail(4).index.tolist()
-
+edf.loc[:, 'educated'] = np.where(edf['is_educated'], 'educated', 'naive')
 
 g = sns.catplot(
     data=edf[edf['cdr3_mut_loc'].isin(locs)],
     x='mut_pos', y='diff', hue='tcr',
-    dodge=False, kind='point', ci=None, marker='None',
+    dodge=False, kind='point', ci=None, marker='none',
     #dodge=True, kind='strip', # cool but slow
     col='cdr3_mut_loc',
     col_wrap=2, height=3,

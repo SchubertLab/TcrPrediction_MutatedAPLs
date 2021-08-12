@@ -376,14 +376,23 @@ def get_aa_1hot():
     return aa1h
 
 
-def get_aa_features():
-    fs = pd.concat([
-        get_aa_factors_2(),
-        get_aa_factors(),
-        get_aa_blosum(),
-        get_aa_chem(),
-        get_aa_1hot()
-    ], axis=1)
+def get_aa_features(factors2=True, factors=True, blosum=True, chem=True, onehot=True):
+    feats = []
+    if factors2:
+        feats.append(get_aa_factors_2())
+    if factors:
+        feats.append(get_aa_factors())
+    if blosum:
+        feats.append(get_aa_blosum())
+    if chem:
+        feats.append(get_aa_chem())
+    if onehot:
+        feats.append(get_aa_1hot())
+        
+    if not feats:
+        raise ValueError('must specify at least one type of features')
+    
+    fs = pd.concat(feats, axis=1) if len(feats) > 1 else feats[0]
 
     # add additional row for alignment gaps
     fs['one_hot', 'is_gap'] = 0
