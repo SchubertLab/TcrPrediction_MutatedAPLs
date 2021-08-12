@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from scipy import stats
+from adjustText import adjust_text
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import (average_precision_score, precision_recall_curve,
                              roc_auc_score, roc_curve)
@@ -80,7 +81,8 @@ else:
 #%% tcr distances
 
 ddf = pd.read_csv(
-    '../data/distances_activated_tcrs.csv'
+    #'../data/distances_activated_tcrs.csv'  # cdrdist
+    '../data/tcrdist_all_tcrs.csv'  # tcrdist
 ).set_index('Unnamed: 0')
 
 # copy OT1 distances to new names
@@ -90,6 +92,10 @@ ddf['LR_OTI_2'] = ddf['OT1']
 ddf.loc['OTI_PH'] = ddf.loc['OT1']
 ddf.loc['LR_OTI_1'] = ddf.loc['OT1']
 ddf.loc['LR_OTI_2'] = ddf.loc['OT1']
+
+# normalize all values to [0, 1]
+ddf /= 1e-9 + ddf.values.max()
+
 
 ddf = ddf.reset_index().melt(
     'Unnamed: 0'
@@ -151,6 +157,39 @@ g.savefig('figures/cross-performance.pdf', dpi=192)
 
 #%%
 
+fig, (ax1, ax2) = plt.subplots(1, 2, sharey=True, figsize=(5, 2.5))
+
+sns.regplot(
+    data=pairs.query('train_tcr!=test_tcr & TCRs == "Others"'),
+    marker='+', scatter_kws={'alpha': 0.4},
+    x='tcrdist', y='auc',
+    ax=ax1
+)
+
+sns.regplot(
+    data=pairs.query('train_tcr!=test_tcr & TCRs != "Others"'),
+    marker='+', scatter_kws={'alpha': 0.4},
+    x='tcrdist', y='auc',
+    ax=ax1
+)
+
+sns.regplot(
+    data=pairs.query('train_tcr != test_tcr & TCRs == "Others"'),
+    marker='+', scatter_kws={'alpha': 0.4},
+    x='spearman', y='auc',
+    ax=ax2
+)
+
+sns.regplot(
+    data=pairs.query('train_tcr != test_tcr & TCRs != "Others"'),
+    marker='+', scatter_kws={'alpha': 0.4},
+    x='spearman', y='auc',
+    ax=ax2
+)
+ax2.set(ylabel='')
+sns.despine()
+#%%
+
 dd = pairs.query('test_tcr=="OTI_PH"')[[
     'train_tcr', 'auc', 'tcrdist'
 ]].rename(columns={
@@ -170,11 +209,45 @@ dd['TCR-closeness'] = 1 - dd['tcrdist']
 g = sns.catplot(
     data=dd.drop(columns=['tcrdist']).melt('Other TCR', var_name='Metric'),
     x='Other TCR', y='value', kind='bar', hue='Metric', palette='pastel',
-    aspect=2.5
+    aspect=4, height=2, legend=False
 )
-#g.ax.tick_params(axis='x', rotation=90)
+g.ax.tick_params(axis='x', rotation=90)
+g.add_legend(ncol=3, bbox_to_anchor=(0.52, 1.05))
 xl = g.ax.get_xlim()
 g.ax.plot(xl, [0.96, 0.96], 'r--')
 g.ax.set_xlim(xl)
 g.ax.text(xl[0] + 0.1, 0.98, 'Leave-OT1-out AUC', c='r')
-g.savefig('figures/cross-performance-ot1.pdf', dpi=192)
+#g.tight_layout()
+g.savefig('figures/cross-performance-ot1.pdf', dpi=300)
+
+#%%
+
+cm = plt.get_cmap('viridis')
+g = sns.lmplot(
+    data=dd[~dd['Other TCR'].str.contains('OTI')],
+    x='AUC (Test on OTI_PH)',
+    y='tcrdist',
+    #size='TCR-closeness', facecolors='#ffffff00', edgecolor='C0',
+    #hue='TCR-closeness',
+    height=2, aspect=1.5
+)
+g.set(xlim=(0.3, 1), ylim=(0.4, 1))
+
+# annotate G6
+# xx, yy = dd[dd['Other TCR'] == 'G6'][['AUC (Test on OTI_PH)', 'TCR-closeness']].values[0]       
+# g.ax.text(xx, yy, '  G6', ha='left', va='top')
+
+txt = [
+    g.ax.text(
+        *dd[dd['Other TCR'] == t][['AUC (Test on OTI_PH)', 'tcrdist']].values[0],
+        t
+    ) for t in ['B13', 'F4', 'G6', 'ED46']
+]
+
+adjust_text(
+    txt, x=g.data.values[:, 0], y=g.data.values[:, 1],
+    arrowprops=dict(arrowstyle='-'),
+)
+
+#plt.tight_layout()
+plt.savefig('figures/ot1_auc_tcrdist.pdf', dpi=300, bbox_inches='tight')
