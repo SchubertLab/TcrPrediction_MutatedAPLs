@@ -309,20 +309,20 @@ class Plotter:
         self.plot_ot1_auc(fig, ax3)
         self.plot_naive_test(fig, ax4)
         
-        plot_utils.add_axis_title_fixed_position(fig, ax1, '(a)')
-        plot_utils.add_axis_title_fixed_position(fig, ax2, '(b)')
-        plot_utils.add_axis_title_fixed_position(fig, ax3, '(c)')
-        plot_utils.add_axis_title_fixed_position(fig, ax4, '(d)')
+        fig.text(0.03, 1, '(a)', size='large', weight='bold')
+        fig.text(0.97, 1, '(b)', size='large', weight='bold')
+        fig.text(0.03, 0.47, '(c)', size='large', weight='bold')
+        fig.text(0.97, 0.44, '(d)', size='large', weight='bold')
         
-        # ax1.legend([
-        #     mpl.lines.Line2D([], [], c='C0'),
-        #     mpl.lines.Line2D([], [], c='C1'),
-        #     mpl.lines.Line2D([], [], c='C2'),
-        # ], [
-        #     'Educated', 'Naive', 'OT1'
-        # ], ncol=3,
-        #     bbox_to_anchor=(0.5, 1.2), loc="upper center"
-        # )
+        fig.legend([
+            mpl.lines.Line2D([], [], c='C0'),
+            mpl.lines.Line2D([], [], c='C1'),
+            mpl.lines.Line2D([], [], c='C2'),
+        ], [
+            'Educated', 'Naive', 'OT1'
+        ], ncol=3,
+            bbox_to_anchor=(0.5, 1.05), loc="upper center"
+        )
         
         fig.tight_layout()
         fig.savefig('figures/manuscript_generalization.pdf',
