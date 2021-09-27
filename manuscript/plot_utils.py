@@ -46,3 +46,12 @@ def set_font_size(font_size):
     plt.rc('legend', fontsize=font_size, title_fontsize=font_size)    # legend fontsize
     plt.rc('figure', titlesize=font_size)   # fontsize of the figure title
 
+
+def interpolate_transparency(foreground, alpha, background=(1,1,1)):
+    (fr, fg, fb, *_), (br, bg, bb, *_) = foreground, background
+    
+    return (
+        alpha * fr + (1 - alpha * br),    
+        alpha * fg + (1 - alpha * bg),
+        alpha * fb + (1 - alpha * bb),
+    )

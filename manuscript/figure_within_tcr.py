@@ -19,6 +19,7 @@ import plot_utils
 
 warnings.filterwarnings('ignore', 'invalid value encountered in true_divide')
 
+
 #%%
 
 class PlotData:
@@ -272,6 +273,7 @@ class Plotter:
         ax.grid(False)
         ax.set_ylabel('Precision')
         ax.set_xlabel('Recall')
+        sns.despine(ax=ax)
     
     def plot_aps_boxplot(self, fig, ax2):
         #apss = pp.query('normalization == "AS" & threshold == 46.9 & reduced_features == "redux"')
@@ -292,70 +294,131 @@ class Plotter:
         
         # annotate OTI
         ax2.plot([-0.25], [bp.query('tcr=="OTI_PH" & Metric == "Spearman"').iloc[0]['Value']],
-                 'C2o', label='OTI_PH')
+                 'C2v', label='OTI_PH')
         ax2.plot([0.75], [bp.query('tcr=="OTI_PH" & Metric == "APS"').iloc[0]['Value']], 'C2o')
         
         #ax2.tick_params(axis='x', rotation=-10)
         ax2.set_ylabel('')
         ax2.legend(bbox_to_anchor=(0.5, 1.2), loc="upper center")
         ax2.grid(False)
+        sns.despine(ax=ax2)
         
-    def plot_data_size(self, fig, ax3):
-        # right boxplot
-        fig.tight_layout()
-        sns.despine()
-        
+    def plot_data_size(self, fig, ax3, ax6):
         data = self.plot_data.lmdf.query('Metric=="Spearman"').groupby([
             'Repertoire', 'Split', 'tcr'
         ])['Value'].agg('mean').reset_index()
         
-        order = ['LMO', 'L10O', 'L25O', 'L50O', 'LAO', 'L75O', 'L90O', 'L95O', 'LPO']
-        # sns.boxplot(
-        #     #data=lmdf.query('Metric=="Spearman"'),
-        #     data=data,
-        #     x='Split', y='Value', hue='Repertoire',
-        #     order=order, hue_order=['Naive', 'Educated'],
-        #     ax=ax3, fliersize=1, color='#ffffffff'
-        # )
+        data_size = data[
+            ~data['Split'].isin(['LMO', 'LPO', 'LAO'])
+        ].replace({'Split': {
+            f'L{p}O': f'{100 - p}%' for p in [10, 25, 50, 75, 90, 95]
+        }})
+            
+        cm = plt.get_cmap('tab10')
+        
+        # strip of all points
+        sns.stripplot(
+            data=self.plot_data.lmdf[(
+                ~self.plot_data.lmdf['Split'].isin(['LMO', 'LPO', 'LAO'])
+            ) & (
+                self.plot_data.lmdf['Metric'] == 'Spearman'
+            )],
+            x='Split', y='Value', hue='Repertoire', dodge=True,
+            s=1, ax=ax3, alpha=0.5,
+        )
         
         sns.stripplot(
-            data=data,
-            x='Split', y='Value', hue='Repertoire',
-            order=order, hue_order=['Naive', 'Educated'],
-            ax=ax3, s=2, dodge=True, #color='k',
+            data=self.plot_data.lmdf[(
+                self.plot_data.lmdf['Split'].isin(['LMO', 'LPO', 'LAO'])
+            ) & (
+                self.plot_data.lmdf['Metric'] == 'Spearman'
+            )],
+            x='Split', y='Value', hue='Repertoire', dodge=True,
+            s=1, ax=ax6, alpha=0.5,
+        )
+
+        # ot1
+        g = sns.pointplot(
+            data=self.plot_data.lmdf[(
+                self.plot_data.lmdf['Metric'] == 'Spearman'
+            ) & (
+              self.plot_data.lmdf['tcr'] == 'OTI_PH'
+            ) & (
+                self.plot_data.lmdf['Split'].isin([
+                    'L10O', 'L25O', 'L50O', 'L75O', 'L90O', 'L95O'
+                ])
+            )],
+            x='Split', y='Value',
+            color=plot_utils.interpolate_transparency(cm(2), 0.6),
+            markers='_', ci='sd', ax=ax3, dodge=False, join=False,
         )
         
-        sns.pointplot(
-            data=data,
-            x='Split', y='Value', hue='Repertoire',
-            order=order, hue_order=['Naive', 'Educated'],
-            ax=ax3, s=2, dodge=True, ci=None,
+        g = sns.pointplot(
+            data=self.plot_data.lmdf[(
+                self.plot_data.lmdf['Metric'] == 'Spearman'
+            ) & (
+                self.plot_data.lmdf['tcr'] == 'OTI_PH'
+            ) & (
+                self.plot_data.lmdf['Split'].isin([
+                    'LAO', 'LMO', 'LPO'
+                ])
+            )],
+            x='Split', y='Value',
+            color=plot_utils.interpolate_transparency(cm(2), 0.6),
+            markers='_', ci='sd', ax=ax6, dodge=False, join=False,
         )
+                
+        # pointplot of all points
+        g = sns.pointplot(
+            data=data_size,
+            x='Split', y='Value', hue='Repertoire',
+            hue_order=['Naive', 'Educated'],
+            ax=ax3, dodge=0.4,
+            ci=None, markers='.',
+            palette={
+                'Naive': plot_utils.interpolate_transparency(cm(0), 0.6),
+                'Educated': plot_utils.interpolate_transparency(cm(1), 0.6),
+            }
+        )
+        plt.setp(g.get_lines(), linewidth=1.5)
         
-        oti_values = self.plot_data.lmdf.query(
-            'Metric == "Spearman" & tcr == "OTI_PH"'
-        ).groupby('Split')['Value'].mean().loc[order]
-        ax3.plot([x - 0.25 for x in range(len(order))], oti_values.values, 'C2o',
-                 label='OTI_PH')
+        g = sns.pointplot(
+            data=data[data['Split'].isin(['LMO', 'LPO', 'LAO'])],
+            x='Split', y='Value', hue='Repertoire',
+            hue_order=['Naive', 'Educated'],
+            ax=ax6, s=2, dodge=0.5,
+            ci=None, markers='.',
+            palette={
+                'Naive': plot_utils.interpolate_transparency(cm(0), 0.6),
+                'Educated': plot_utils.interpolate_transparency(cm(1), 0.6),
+            },
+        )
+        plt.setp(g.get_lines(), linewidth=1.5)
         
-        # # statistical significance for APS metric
-        # # NB: hardcoded based on the p-values printed when you run the script
-        # ax3.plot([0, 0, 5, 5], [1.15, 1.175, 1.175, 1.15], lw=1, c='k')
-        # ax3.text(2.5, 1.175, "p = 2.7e-5 ***", ha='center', va='bottom')
-        # ax3.plot([0, 0, 3, 3], [1.05, 1.075, 1.075, 1.05], lw=1, c='k')
-        # plt.text(1.5, 1.075, "p = 0.36", ha='center', va='bottom')
-        
-        #ax3.set_yticks([0, 0.2, 0.4, 0.6, 0.8, 1.0])
-        #ax3.tick_params(axis='x', rotation=90)
-        ax3.set_ylabel('Spearman ')
+        sns.despine(ax=ax3)
+        sns.despine(ax=ax6, left=True)
+        ax3.set_ylim(0, 0.9)
+        ax6.set_ylim(0, 0.9)
+        #ax3.set_yticks([0, 0.2, 0.4, 0.6, 0.8])
+        ax3.set_ylabel('Spearman')
+        ax3.set_xlabel('Amount of training data')
         ax3.grid(False)
-        ax3.legend(ncol=3, bbox_to_anchor=(0.5, 1.2), loc="upper center", title='Repertoire')
+        ax6.get_legend().remove()
+        ax6.grid(False)
+        ax6.set_yticks([])
+        ax6.set_ylabel('')
+        ax6.set_xlabel('Validation Split')
     
     def plot_active_learning(self, fig, ax1, ax2):
         N = 8
         M = 10
         
-        palette = {'active_avg': 'tab:red', 'upper bound': 'tab:olive', 'random': 'tab:cyan'}
+        cm = plt.get_cmap('tab10')
+        palette = {
+            'active_avg': plot_utils.interpolate_transparency(cm(3), 0.6),
+            'upper bound': plot_utils.interpolate_transparency(cm(4), 0.6),
+            'random': plot_utils.interpolate_transparency(cm(5), 0.6),
+        }
         
         for name, ax in zip(['auc', 'Spearman'], [ax1, ax2]):
             dfs_results = []
@@ -366,23 +429,101 @@ class Plotter:
                 dfs_results.append(df)
                 
             df_joint = pd.concat(dfs_results)
-            plot = sns.lineplot(
+            # plot = sns.lineplot(
+            #     data=df_joint, x='iteration', y=name, hue='method',
+            #     palette=palette, ax=ax
+            # )
+            g = sns.pointplot(
                 data=df_joint, x='iteration', y=name, hue='method',
-                palette=palette, ax=ax
+                palette=palette, ax=ax, ci=None, dodge=0.5,
+                markers='.'
             )
-            sns.despine(bottom=False, left=False)
+            plt.setp(g.get_lines(), linewidth=1.5)
             
-            plot.set(xlabel='Amount Samples')
+            sns.stripplot(
+                data=df_joint, x='iteration', y=name, hue='method',
+                palette=palette, ax=ax, s=1, dodge=True,
+            )
+            
+            sns.despine(ax=ax, bottom=False, left=False)
+            
+            ax.set_xlabel('Amount of Samples')
             if len(name)<=3:
-                plot.set(ylabel=name.upper())
+                ax.set_ylabel(name.upper())
                 
-            ax.legend(title='Sampling Method', labels=['Active', 'Random', 'Upper Bound'])
+            ax.legend(title='Sampling Method',
+                      labels=['Active', 'Random', 'Upper Bound'],
+                      loc='lower right')
             x_ticks = list(range(0, M))
             x_labels = ['9'] + [str(9+(i+1)*N) for i in range(M-1)]
-            plot.set_xticks(x_ticks)
-            plot.set_xticklabels(x_labels)
+            ax.set_xticks(x_ticks)
+            ax.set_xticklabels(x_labels)
             ax1.grid(False)
             ax2.grid(False)
+    
+    def get_axes(self, fig):
+        gridspecs = {}
+        axes = {}
+        
+        gridspecs["gs_123456"] = mpl.gridspec.GridSpec(
+            figure=fig,
+            nrows=2,
+            ncols=1,
+            height_ratios=[2, 2],
+            width_ratios=[6],
+            # wspace=0.09999999999999999,
+            # hspace=0.25,
+        )
+        
+        gridspecs["gs_1234"] = mpl.gridspec.GridSpecFromSubplotSpec(
+            subplot_spec=gridspecs["gs_123456"][0],
+            nrows=1,
+            ncols=2,
+            height_ratios=[2],
+            width_ratios=[2, 2],
+            # wspace=0.39999999999999997,
+            # hspace=0.25,
+        )
+        
+        gridspecs["gs_12"] = mpl.gridspec.GridSpecFromSubplotSpec(
+            subplot_spec=gridspecs["gs_1234"][0],
+            nrows=1,
+            ncols=2,
+            height_ratios=[2],
+            width_ratios=[2, 1],
+            wspace=0.3,
+            # hspace=0.25,
+        )
+        
+        axes["ax_1"] = fig.add_subplot(gridspecs["gs_12"][0])
+        axes["ax_2"] = fig.add_subplot(gridspecs["gs_12"][1])
+        
+        gridspecs["gs_34"] = mpl.gridspec.GridSpecFromSubplotSpec(
+            subplot_spec=gridspecs["gs_1234"][1],
+            nrows=1,
+            ncols=2,
+            height_ratios=[2],
+            width_ratios=[2, 1],
+            wspace=0.1,
+            # hspace=0.25,
+        )
+        
+        axes["ax_3"] = fig.add_subplot(gridspecs["gs_34"][0])
+        axes["ax_4"] = fig.add_subplot(gridspecs["gs_34"][1])
+        
+        gridspecs["gs_56"] = mpl.gridspec.GridSpecFromSubplotSpec(
+            subplot_spec=gridspecs["gs_123456"][1],
+            nrows=1,
+            ncols=2,
+            height_ratios=[2],
+            width_ratios=[3, 3],
+            # wspace=0.19999999999999998,
+            # hspace=0.25,
+        )
+        axes["ax_5"] = fig.add_subplot(gridspecs["gs_56"][0])
+        axes["ax_6"] = fig.add_subplot(gridspecs["gs_56"][1])
+        
+        return axes
     
     def plot(self):
         sns.set(context='paper', style='whitegrid')
@@ -395,50 +536,19 @@ class Plotter:
             dpi=self.dpi,
         )
         
-        gridspecs = {}
-        axes = {}
-        
-        gridspecs["gs_12345"] = mpl.gridspec.GridSpec(
-            figure=fig,
-            nrows=2,
-            ncols=1,
-            height_ratios=[1, 1],
-            width_ratios=[6],
-        )
-        
-        gridspecs["gs_123"] = mpl.gridspec.GridSpecFromSubplotSpec(
-            subplot_spec=gridspecs["gs_12345"][0],
-            nrows=1,
-            ncols=3,
-            height_ratios=[2],
-            width_ratios=[2, 1, 3],
-        )
-        axes["ax_1"] = fig.add_subplot(gridspecs["gs_123"][0])
-        axes["ax_2"] = fig.add_subplot(gridspecs["gs_123"][1])
-        axes["ax_3"] = fig.add_subplot(gridspecs["gs_123"][2])
-        
-        gridspecs["gs_45"] = mpl.gridspec.GridSpecFromSubplotSpec(
-            subplot_spec=gridspecs["gs_12345"][1],
-            nrows=1,
-            ncols=2,
-            height_ratios=[1],
-            width_ratios=[3, 3],
-            wspace=0.2,
-            hspace=0.5,
-        )
-        axes["ax_4"] = fig.add_subplot(gridspecs["gs_45"][0])
-        axes["ax_5"] = fig.add_subplot(gridspecs["gs_45"][1])
+        axes = self.get_axes(fig)
         
         self.plot_prc(fig, axes['ax_1'])
         self.plot_aps_boxplot(fig, axes['ax_2'])
-        self.plot_data_size(fig, axes['ax_3'])
-        self.plot_active_learning(fig, axes['ax_4'], axes['ax_5'])
+        self.plot_data_size(fig, axes['ax_3'], axes["ax_4"])
+        self.plot_active_learning(fig, axes['ax_5'], axes['ax_6'])
         
         fig.text(0.05, 0.95, '(a)', size='large', weight='bold')
         fig.text(0.33, 0.95, '(b)', size='large', weight='bold')
-        fig.text(0.95, 0.95, '(c)', size='large', weight='bold')
-        fig.text(0.04, 0.49, '(d)', size='large', weight='bold')
-        fig.text(0.95, 0.49, '(e)', size='large', weight='bold')
+        fig.text(0.80, 0.95, '(c)', size='large', weight='bold')
+        fig.text(0.95, 0.95, '(d)', size='large', weight='bold')
+        fig.text(0.03, 0.49, '(e)', size='large', weight='bold')
+        fig.text(0.53, 0.49, '(f)', size='large', weight='bold')
         
         axes['ax_1'].get_legend().remove()
         axes['ax_3'].get_legend().remove()
@@ -447,8 +557,8 @@ class Plotter:
             mpl.patches.Patch(facecolor='C1'),
             mpl.patches.Patch(facecolor='C2'),
         ], [
-            'Naive', 'Educated', 'OTI_PH',
-        ], ncol=3, bbox_to_anchor=(1, 1.15), loc='upper center')
+            'Naive', 'Educated', 'OTI',
+        ], ncol=3, bbox_to_anchor=(1.5, 1.15), loc='upper center')
         
         fig.tight_layout()
             
