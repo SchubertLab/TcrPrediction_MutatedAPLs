@@ -15,7 +15,7 @@ from preprocessing import get_dataset, get_aa_features, full_aa_features
 
 
 def get_distances():
-    data = pd.read_csv('Modelling3D/Output/features/distances_B11.csv', index_col=0)
+    data = pd.read_csv('../Modelling3D/Output/features/distances_B11.csv', index_col=0)
     data = data.sort_index()
     data = data[data.index != 'SIINFEKL']
 
@@ -23,7 +23,7 @@ def get_distances():
 
 
 def get_labels():
-    activations = pd.read_csv('data/activations_lena.csv', index_col=0)
+    activations = pd.read_csv('../data/activations_lena.csv', index_col=0)
     activations = activations.sort_index()
     activations['is_activated'] = activations['B11'] > 15
     activations = activations[activations.index != 'SIINFEKL']
@@ -108,4 +108,4 @@ else:
 
 plt.tight_layout()
 sns.despine()
-plt.savefig('figures/tcr_specific_activation_aucs.pdf', dpi=192)
+plt.savefig('figures/tcr_specific_activation_aucs_spatial.pdf', dpi=600)
