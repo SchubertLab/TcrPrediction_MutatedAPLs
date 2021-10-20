@@ -1,4 +1,4 @@
-import numpy as np
+# import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -10,7 +10,6 @@ from umap import UMAP
 
 def get_data():
     data = pd.read_csv('../data/tcrs_high.csv', index_col=0)
-    data = data.transpose()
     # data = data.transpose()
     return data
 

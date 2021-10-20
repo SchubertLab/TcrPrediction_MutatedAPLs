@@ -4,7 +4,7 @@ import pandas as pd
 import math
 import matplotlib.pyplot as plt
 
-# from pymol import cmd
+from pymol import cmd
 
 
 aminos_3_to_1 = {
@@ -31,17 +31,24 @@ aminos_3_to_1 = {
 }
 
 
-def plot_distances(do_beta=True, do_save=False, mode='min'):
-    epitope, chain = get_sequence_names(do_beta)
+def plot_distances(do_beta=True, do_save=False, do_return=False, mode='min', use_igtm=False, idx=0):
+    epitope, chain = get_sequence_names(do_beta, idx=idx)
     epitope_sel = find_sequence(epitope)
     chain_sel = find_sequence(chain)
 
     distances_matrix = calculate_distance_matrix(epitope_sel, chain_sel, mode=mode)
-    plot_matrix(distances_matrix, list(chain), list(epitope), do_save=do_save)
+
+    if do_return:
+        return distances_matrix
+
+    plot_matrix(distances_matrix, list(chain), list(epitope), do_save=do_save, use_igtm=use_igtm, do_beta=do_beta,
+                idx=idx)
+    if do_save:
+        save_matrix(distances_matrix)
 
 
-def get_sequence_names(do_beta=True):
-    tcr_name, epitope = cmd.get_names()[0].split('_')
+def get_sequence_names(do_beta=True, idx=0):
+    tcr_name, epitope = cmd.get_names()[idx].split('_')
     chain_type = 'CDR3B'
     if not do_beta:
         chain_type = 'CDR3A'
@@ -52,7 +59,10 @@ def get_sequence_names(do_beta=True):
 
 
 def find_sequence(sequence):
-    cmd.iterate("name ca", "amino_list.append((resi,aminos_3_to_1[resn],chain))")
+    my_space = {'amino_list': [],
+                'aminos_3_to_1': aminos_3_to_1}
+    cmd.iterate("name ca", "amino_list.append((resi,aminos_3_to_1[resn],chain))", space=my_space)
+    amino_list = my_space['amino_list']
     amino_seq = ''.join([x[1] for x in amino_list])
     idx_start = amino_seq.find(sequence)
     idx_end = idx_start + len(sequence)
@@ -95,9 +105,13 @@ def calculate_center_of_mass_distance(selection_1, selection_2):
     return distance
 
 
-def plot_matrix(matrix, x_ticks, y_ticks, do_save, do_igtm=False):
-    plt.clf()
+def plot_matrix(matrix, x_ticks, y_ticks, do_save, use_igtm=False, do_beta=True, idx=0):
+    if do_save:
+        plt.clf()
     plt.figure(figsize=(15, 8))
+    if use_igtm:
+        x_ticks = sequence_to_igtm(''.join(x_ticks))
+
     ax = sns.heatmap(matrix, center=0, linewidths=0.5, cmap='RdBu_r', square=True,
                          xticklabels=x_ticks, vmax=30, vmin=0, annot=True, fmt=".1f")
     ax.set_yticklabels(y_ticks, rotation=0)
@@ -106,21 +120,37 @@ def plot_matrix(matrix, x_ticks, y_ticks, do_save, do_igtm=False):
         plt.tight_layout()
         plt.show()
         return
-    path_out = '../results/model3d/' + cmd.get_names()[0]
+    if do_beta:
+        path_out = '../results/model3d/' + cmd.get_names()[idx] + '_beta'
+    else:
+        path_out = '../results/model3d/' + cmd.get_names()[idx] +'_alpha'
     plt.savefig(path_out, dpi='figure')
 
 
+def save_matrix(matrix, path_out='../results/model3d/test_alpha.csv'):
+    df = pd.DataFrame(matrix)
+    df.to_csv(path_out)
+
+
 def sequence_to_igtm(sequence):
-    print((len(sequence)+1)//2)
     scheme = [str(x) for x in range(104, 112)]
     scheme += ['111.' + str(x) for x in range(1, 10)]
     scheme += ['112.' + str(x) for x in reversed(range(1, 10))]
     scheme += [str(x) for x in range(112, 119)]
-    return scheme[: (len(sequence)+1)//2] + scheme[-len(sequence)//2:]
 
+    front = []
+    back = []
+    for i in range(len(sequence)):
+        if i % 2 == 0:
+            front.append(scheme[i//2])
+        else:
+            back.insert(0, scheme[-i//2])
+    # return scheme[: (len(sequence)+1)//2] + scheme[-len(sequence)//2:]
+    return front + back
 
 amino_list = []
-# plot_distances(do_beta=True, do_save=True, mode='com')
-# print(list('CASSRANYEQYF'))
-print(sequence_to_igtm('CASSRANYEQYF'))
-# print('---Finished---')
+
+
+if __name__ == 'pymol':
+    plot_distances(do_beta=False, do_save=True, mode='com', use_igtm=True, idx=0)
+    print('finished')

@@ -16,7 +16,7 @@ def create_fasta_file(tcr, position=None, amino_acid_code=None, epitope=None):
         'TCRB': tcr_beta,
         'AG': epitope
     }
-    path_out = f'fasta_files/{tcr}_{epitope}.fasta'
+    path_out = f'fasta_files/{epitope}/{tcr}_{epitope}.fasta'
     write_to_file(path_out, sequences)
 
 
@@ -70,5 +70,15 @@ if __name__ == '__main__':
     # create_fasta_file('OT1', epitope='SIINFERL')  # max in OT1
     # create_fasta_file('OT1', epitope='SIINFIKL')  # min in OT1
 
-    create_fasta_file('E4', epitope='SIINFEKL')
-    create_fasta_file('B10', epitope='SIINFEKL')
+    # create_fasta_file('E4', epitope='SIINFEKL')
+    # create_fasta_file('B10', epitope='SIINFEKL')
+    base_epitope = 'SIIGFEKL'
+    # create_fasta_file('B11', epitope=base_epitope)
+
+    # for i in range(len(base_epitope)):
+    #     for aa in AMINO_ACIDS:
+    #         epitope = base_epitope[:i] + aa + base_epitope[i+1:]
+    #         create_fasta_file('B11', epitope=epitope)
+    df_tcrs = pd.read_csv('../data/tcrs_full_sequences.csv', index_col=0)
+    for tcr in df_tcrs.index:
+        create_fasta_file(tcr, epitope=base_epitope)

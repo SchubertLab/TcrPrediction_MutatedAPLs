@@ -8,3 +8,7 @@ data/
 figures/
 results/
 baseline/results/
+.idea/
+Modelling3D/fasta_files/
+Modelling3D/Models/
+Modelling3D/Output/
