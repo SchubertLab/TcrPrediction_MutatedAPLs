@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 import os
 import sys
+import json
 from scipy import stats
 import itertools
 
@@ -29,8 +30,9 @@ class PlotData:
         self.load_ot1_test_data()
         self.load_naive_test_data()
         self.load_auc_data()
-        self.load_ergo_data()
-    
+        self.load_baseline_data()
+        self.load_active_learning_data()
+
     def load_ot1_test_data(self):
 
         # tcr distances
@@ -146,44 +148,106 @@ class PlotData:
         self.auc_data = pdf
         self.aucs = aucs
         
-    def load_ergo_data(self):
-        def get_auc_per_tcr(data, tcr, y_true, ergo=True):
-            data_tmp = data[data['tcr']==tcr]
-            col_pred = 'pred'
-            if ergo:
-                col_pred = 'Score'
+    def load_baseline_data(self):
+        def get_auc_per_tcr(data, tcr, y_true, col_pred):
+            data_tmp = data[data['tcr'] == tcr]
             y_pred = data_tmp[col_pred]
             auc_score = metrics.roc_auc_score(y_true, y_pred)
-            return auc_score  
-        
-        path_res = f'results/ergo2_vdjdb.csv'
-        prediction_ergo = pd.read_csv(path_res, index_col=0)
-        prediction_ergo = prediction_ergo[prediction_ergo['Peptide']!='SIINFEKL']
-        
-        path_our = 'results/tcr_stratified_classification_performance.csv.gz'
-        prediction_ours = pd.read_csv(path_our, compression='gzip')
-        prediction_ours = prediction_ours[prediction_ours['normalization']=='AS']
-        prediction_ours = prediction_ours[prediction_ours['threshold']==46.9]
+            return auc_score
+
+        prediction_ergo = self.load_ergo_data()
+        prediction_ours = self.load_ours_data()
+        prediction_imrex = self.load_imrex_data()
+        prediction_titan = self.load_titan_data()
+
         prediction_ours = prediction_ours[prediction_ours['tcr'].isin(prediction_ergo['tcr'].unique())]
-        prediction_ours = prediction_ours[prediction_ours['reduced_features']]
-        
+
         performance = []
         for tcr in prediction_ergo['tcr'].unique():
-            if tcr == 'LR_OTI_1' or tcr == 'LR_OTI_2':
+            if tcr in ['LR_OTI_1', 'LR_OTI_2']:
                 continue
-            y_true = prediction_ours[prediction_ours['tcr']==tcr]['is_activated']
-            auc_ergo = get_auc_per_tcr(prediction_ergo, tcr, y_true)
-            auc_ours = get_auc_per_tcr(prediction_ours, tcr, y_true, ergo=False)
-            performance.append([tcr, auc_ergo, auc_ours])
-        performance = pd.DataFrame(performance, columns=['tcr', 'ergo', 'ours'])
+            y_true = prediction_ours[prediction_ours['tcr'] == tcr]['is_activated']
+            auc_ergo = get_auc_per_tcr(prediction_ergo, tcr, y_true, col_pred='Score')
+            auc_imrex = get_auc_per_tcr(prediction_imrex, tcr, y_true, col_pred='prediction_score')
+            auc_titan = get_auc_per_tcr(prediction_titan, tcr, y_true, col_pred='Score')
+            auc_ours = get_auc_per_tcr(prediction_ours, tcr, y_true, col_pred='pred')
+            performance.append([tcr, auc_ergo, auc_imrex, auc_titan, auc_ours])
+        performance = pd.DataFrame(performance, columns=['tcr', 'ergo', 'imrex', 'titan', 'ours'])
         performance = performance[~performance['tcr'].isin(['LR_OTI_1', 'LR_OTI_2'])]
         performance = performance.set_index('tcr')
-        
+        order = list(performance.index)
+        order.remove('OTI_PH')
+        order = ['OTI_PH'] + order
+        performance = performance.reindex(order)
         self.performance = performance
+
+    def load_ours_data(self):
+        path_our = 'results/tcr_stratified_classification_performance.csv.gz'
+        prediction_ours = pd.read_csv(path_our, compression='gzip')
+        prediction_ours = prediction_ours[prediction_ours['normalization'] == 'AS']
+        prediction_ours = prediction_ours[prediction_ours['threshold'] == 46.9]
+        return prediction_ours
+
+    def load_ergo_data(self):
+        path_res = f'results/ergo2_vdjdb.csv'
+        prediction_ergo = pd.read_csv(path_res, index_col=0)
+        prediction_ergo = prediction_ergo[prediction_ergo['Peptide'] != 'SIINFEKL']
+        return prediction_ergo
+
+    def load_imrex_data(self):
+        path_imrex = f'results/MG_imrex.csv'
+        prediction_imrex = pd.read_csv(path_imrex, index_col=0)
+        prediction_imrex = prediction_imrex[prediction_imrex['antigen.epitope'] != 'SIINFEKL']
+        return prediction_imrex
+
+    def load_titan_data(self):
+        path_res = f'results/output_titan_prediction.npy'
+        prediction_titan = pd.read_csv(f'results/ergo2_vdjdb.csv',
+                                       index_col=0)  # read ergo for the remaining information
+        prediction_titan['Score'] = np.load(path_res)[0]
+        prediction_titan = prediction_titan[prediction_titan['Peptide'] != 'SIINFEKL']
+        return prediction_titan
+
+    def load_active_learning_data(self):
+        results_active = self.load_active()
+        results_random = self.load_random()
+        results_upper = self.load_upper()
+
+        self.summary_active = {
+            'active': results_active,
+            'random': results_random,
+            'upper bound': results_upper,
+        }
+
+    def load_active(self):
+        path_res = 'results/active_learning/across/crossTCR_FULL_active_8_10.json'
+        with open(path_res) as f:
+            results = json.load(f)
+        return results
+
+    def load_random(self):
+        path_res = 'results/active_learning/across/crossTCR_FULL_random_8_10.json'
+        with open(path_res) as f:
+            results = json.load(f)
+        return results
+
+    def load_upper(self):
+        path_in = f'results/active_learning/across/greedy/'
+        res_files = [path_in + f for f in os.listdir(path_in) if os.path.isfile(os.path.join(path_in, f))]
+
+        results_upper = {}
+
+        for path_file in res_files:
+            with open(path_file) as f:
+                res_tmp = json.load(f)
+            for mtc, vals in res_tmp.items():
+                if mtc not in results_upper:
+                    results_upper[mtc] = []
+                results_upper[mtc] += vals
+        return results_upper
 
 
 plot_data = PlotData()
-
 
 #%% numbers for manuscript
     
@@ -328,53 +392,59 @@ class Plotter:
         sns.despine(ax=ax)
         ax.grid(False)
         
-    def plot_ergo_data(self, fig, ax):
+    def plot_baseline_data(self, fig, ax):
         educated_colors = sns.color_palette(
-            'Oranges', n_colors=16 + 4
+            'Oranges', n_colors=len(self.plot_data.performance.index) + 4
         )
-        educated_idx = 1
-        
+
         naive_colors = sns.color_palette(
-            'Blues', n_colors=11 + 4
+            'Blues', n_colors=len(self.plot_data.performance.index) + 4
         )
+
+        color_dict = {}
+
+        educated_idx = 1
         naive_idx = 1
-        
-        ot1_colors = sns.color_palette(
-            'Greens', n_colors=2
-        )
-        ot1_idx = 1
-        
-        for row in self.plot_data.performance.iterrows():
-            if row[0] == 'OTI_PH':
-                c = ot1_colors[ot1_idx]
-                c = sns.color_palette("Greens")[3]
-                ot1_idx += 1
-            elif row[0].startswith('ED'):
-                c = educated_colors[educated_idx]
-                c = 'C1'
+        for tcr in self.plot_data.performance.index:
+            if tcr.startswith('ED'):
                 educated_idx += 1
+                c = educated_colors[educated_idx]
+            elif tcr == 'OTI_PH':
+                c = 'C2'
             else:
-                c = naive_colors[naive_idx]
-                c = 'C0'
                 naive_idx += 1
-            ax.scatter(row[1]['ergo'], row[1]['ours'], marker='o',
-                       edgecolors=c, facecolors='none')
-        
-        ax.grid(False)
+                c = naive_colors[naive_idx]
+            color_dict[tcr] = c
+
+        performance_cat = self.plot_data.performance
+        performance_cat['tcr'] = performance_cat.index
+        performance_cat = performance_cat.melt(['tcr'], value_name='AUC', var_name='Model')
+        performance_cat['color'] = [color_dict[tcr] for tcr in performance_cat['tcr']]
+
+        plot_cat = sns.swarmplot(data=performance_cat, x='Model', y='AUC', hue='tcr',
+                               order=['titan', 'imrex', 'ergo', 'ours'],
+                               palette=performance_cat['color'], ax=ax)
+        plot_cat.set(ylabel='AUC')
+        plot_cat.set_xticklabels(['TITAN', 'ImRex', 'ERGO2', '%OURs%'])
+
+        ax.get_legend().remove()
+        plot_cat.set(xlabel=None)
         sns.despine(ax=ax)
-        ax.set_xlabel('AUC Ergo2')
-        ax.set_ylabel('AUC Ours')
-        ax.set_ylim(0, 1)
-        ax.set_xlim(0, 1)
-        
-        ax.plot((0, 1), (0, 1), 'r--')
+        ax.grid(False)
     
     def get_axes(self, fig):
         gridspecs = {}
         axes = {}
-        
-        gridspecs["gs_1234"] = mpl.gridspec.GridSpec(
+
+        gridspecs["gs_123456"] = mpl.gridspec.GridSpec(
             figure=fig,
+            nrows=2,
+            ncols=1,
+            height_ratios=[3, 1.25]
+        )
+
+        gridspecs["gs_1234"] = mpl.gridspec.GridSpecFromSubplotSpec(
+            subplot_spec=gridspecs["gs_123456"][0],
             nrows=1,
             ncols=2,
             height_ratios=[3],
@@ -390,7 +460,7 @@ class Plotter:
             height_ratios=[2, 1],
             width_ratios=[2],
             #wspace=0.3,
-            #hspace=0.3333333333333333,
+            hspace=0.3333333333333333,
         )
         axes["ax_1"] = fig.add_subplot(gridspecs["gs_13"][0])
         axes["ax_3"] = fig.add_subplot(gridspecs["gs_13"][1])
@@ -402,33 +472,97 @@ class Plotter:
             height_ratios=[1, 2],
             width_ratios=[2],
             #wspace=0.3,
-            #hspace=0.3333333333333333,
+            hspace=0.3333333333333333,
         )
         axes["ax_2"] = fig.add_subplot(gridspecs["gs_24"][0])
         axes["ax_4"] = fig.add_subplot(gridspecs["gs_24"][1])
-        
+
+        gridspecs["gs_56"] = mpl.gridspec.GridSpecFromSubplotSpec(
+            subplot_spec=gridspecs["gs_123456"][1],
+            nrows=1,
+            ncols=2,
+            height_ratios=[1],
+            width_ratios=[1, 1]
+        )
+        axes["ax_5"] = fig.add_subplot(gridspecs["gs_56"][0])
+        axes["ax_6"] = fig.add_subplot(gridspecs["gs_56"][1])
+
         return axes
-    
+
+    def plot_active_learning(self, fig, ax1, ax2):
+        cm = plt.get_cmap('tab10')
+        palette = {
+            'active': plot_utils.interpolate_transparency(cm(3), 0.6),
+            'upper bound': plot_utils.interpolate_transparency(cm(4), 0.6),
+            'random': plot_utils.interpolate_transparency(cm(5), 0.6),
+        }
+
+        for name, ax in zip(['auc', 'Spearman'], [ax1, ax2]):
+            dfs_results = []
+            for method in self.plot_data.summary_active.keys():
+                df = pd.DataFrame(self.plot_data.summary_active[method][name])
+                df.columns = ['tcr', 'iteration', name]
+                df['method'] = method
+                dfs_results.append(df)
+
+            df_joint = pd.concat(dfs_results)
+            # plot = sns.lineplot(
+            #     data=df_joint, x='iteration', y=name, hue='method',
+            #     palette=palette, ax=ax
+            # )
+            g = sns.pointplot(
+                data=df_joint, x='iteration', y=name, hue='method',
+                palette=palette, ax=ax, ci=None, dodge=0.5,
+                markers='.'
+            )
+            plt.setp(g.get_lines(), linewidth=1.5)
+
+            sns.stripplot(
+                data=df_joint, x='iteration', y=name, hue='method',
+                palette=palette, ax=ax, s=1, dodge=True,
+            )
+
+            sns.despine(ax=ax, bottom=False, left=False)
+
+            ax.set_xlabel('Amount of Samples')
+            if len(name) <= 3:
+                ax.set_ylabel(name.upper())
+
+            ax.legend(title='Sampling Method',
+                      labels=['Active', 'Random', 'Upper Bound'],
+                      loc='lower right')
+            x_ticks = list(range(0, 10))
+            x_labels = ['9'] + [str(9 + (i + 1) * 8) for i in range(10 - 1)]
+            ax.set_xticks(x_ticks)
+            ax.set_xticklabels(x_labels)
+            ax1.grid(False)
+            ax2.grid(False)
+
     def plot(self):
         sns.set(context='paper', style='whitegrid')
         plt.rc('grid', linewidth=0.3)
         sns.set_palette('colorblind')
         plot_utils.set_font_size(6)
         
-        fig = plt.figure(figsize=(self.textwidth, self.textwidth / 1.5), 
+        fig = plt.figure(figsize=(self.textwidth, self.textwidth / 1.25), #/ 1.5),
                          dpi=self.dpi)
         axes = self.get_axes(fig)
         
         self.plot_aucs(fig, axes['ax_1'])
         self.plot_naive_test(fig, axes['ax_2'])
         self.plot_ot1_auc(fig, axes['ax_3'])
-        self.plot_ergo_data(fig, axes['ax_4'])
-        
-        fig.text(0.03, 1, '(a)', size='large', weight='bold')
-        fig.text(0.97, 1, '(b)', size='large', weight='bold')
-        fig.text(0.03, 0.4, '(c)', size='large', weight='bold')
-        fig.text(0.97, 0.64, '(d)', size='large', weight='bold')
-        
+        self.plot_baseline_data(fig, axes['ax_4'])
+        self.plot_active_learning(fig, axes['ax_5'], axes['ax_6'])
+
+        fig.text(0.01, 0.99, '(a)', size='large', weight='bold')
+        fig.text(0.5, 0.99, '(b)', size='large', weight='bold')
+        fig.text(0.01, 0.59, '(c)', size='large', weight='bold')
+        fig.text(0.5, 0.74, '(d)', size='large', weight='bold')
+        fig.text(0.01, 0.33, '(e)', size='large', weight='bold')
+        fig.text(0.5, 0.33, '(f)', size='large', weight='bold')
+        # 0.97
+        # 0.03
+
         fig.legend([
             mpl.lines.Line2D([], [], c='C1'),
             mpl.lines.Line2D([], [], c='C0'),
@@ -441,6 +575,8 @@ class Plotter:
         
         fig.tight_layout()
         fig.savefig('figures/manuscript_generalization.pdf',
+                    dpi=self.dpi, bbox_inches='tight')
+        fig.savefig('figures/manuscript_generalization.png',
                     dpi=self.dpi, bbox_inches='tight')
         
 

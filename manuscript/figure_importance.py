@@ -28,7 +28,8 @@ class PlotData:
     def __init__(self):
         self.load_data_permutation_importance()
         self.load_position_importance_data()
-        
+        self.load_3D_distances()
+
     def load_data_permutation_importance(self):
         fname = 'results/tcr_stratified_permutation_importance.csv.gz'
         pdf = pd.read_csv(fname)
@@ -86,6 +87,47 @@ class PlotData:
         pp['is_educated'] = pp['tcr'].str.startswith('ED')
         
         self.importance_data = pp
+
+    def load_3D_distances(self):
+        fname = '../manuscript/results/distances_SIINFEKL.csv'
+        distances = pd.read_csv(fname, index_col=0)
+
+        def get_distance_matrices(do_alpha=True):
+            col = 'features_beta'
+            if do_alpha:
+                col = 'features_alpha'
+            col = distances[col]
+
+            distance_dict = {}
+            for tcr in col.index:
+                dist = col[tcr]
+                dist = dist.split(',')
+                dist = [float(el) for el in dist]
+                dist = np.array(dist)
+                dist = dist.reshape(8, -1)
+                distance_dict[tcr] = dist
+            return distance_dict
+
+        distances_alpha = get_distance_matrices()
+        distances_beta = get_distance_matrices(do_alpha=False)
+        max_value = 0
+        min_value = 99
+        min_dist_dict = {}
+        for tcr in distances_beta:
+            dist_alpha = distances_alpha[tcr]
+            dist_alpha = np.min(dist_alpha, axis=1)
+
+            dist_beta = distances_beta[tcr]
+            dist_beta = np.min(dist_beta, axis=1)
+
+            dist_total = np.stack([dist_alpha, dist_beta])
+            dist_total = np.min(dist_total, axis=0, keepdims=True)
+            min_dist_dict[tcr] = dist_total
+            max_value = max(np.max(dist_total).tolist(), max_value)
+            min_value = min(np.min(dist_total).tolist(), min_value)
+        self.min_value = min_value
+        self.max_value = max_value
+        self.distance_dict = min_dist_dict
 
 
 plot_data = PlotData()
@@ -147,20 +189,68 @@ class Plotter:
         ax.grid(False)
         sns.despine(ax=ax)
         plot_utils.add_axis_title_fixed_position(fig, ax, '(b)')
-        
+
+    def plot_avg_dist(self, fig, ax1, ax2):
+        dist = self.plot_data.distance_dict
+        dist = np.stack(dist.values())
+        dist = dist.reshape(-1, 8)
+        dist = np.mean(dist, keepdims=True, axis=0)
+        dist = dist.T
+
+        y_labels = [f'P{i + 1}' for i in range(8)]
+        plot = sns.heatmap(dist, square=True, annot=True,
+                           vmin=self.plot_data.min_value, vmax=self.plot_data.max_value, yticklabels=y_labels,
+                           cbar=False,
+                           ax=ax2)
+        plot.set_yticklabels(plot.get_yticklabels(), rotation=0)
+        plot.set_ylabel('Distances averaged over TCRs')
+        plot.set_xticks([])
+        ax2.yaxis.labelpad = 1.5
+        ax2.tick_params(left=True)
+
+        norm = mpl.colors.Normalize(self.plot_data.min_value, self.plot_data.max_value)
+        cmap = sns.color_palette("rocket", as_cmap=True)
+        cb = plt.colorbar(mpl.cm.ScalarMappable(norm=norm, cmap=cmap), cax=ax1, label='Distance in Å')
+        cb.outline.set_visible(False)
+        ax1.yaxis.set_ticks_position('left')
+        ax1.yaxis.set_label_position('left')
+        ax1.yaxis.labelpad = 0
+        plot_utils.add_axis_title_fixed_position(fig, ax2, '(c)')
+
     def plot_3d_structures(self, fig, ax1, ax2, ax3):
-        
-        def do_plot(ax, idx, path):
-            ax.imshow(mpl.image.imread(path))
+        def do_plot(ax, idx, path, tcr, crop_x=None, crop_y=None):
+            img = mpl.image.imread(path)
+            if crop_x is not None:
+                img = img[crop_y[0]:crop_y[1], :, :]
+            if crop_y is not None:
+                img = img[:, crop_x[0]:crop_x[1], :]
+            ax.imshow(img)
             ax.grid(False)
             sns.despine(ax=ax, left=True, bottom=True)
-            plot_utils.dd_axis_title_fixed_position(fig, ax, f'({idx})')
+            plot_utils.add_axis_title_fixed_position(fig, ax, f'({idx})')
             ax.set_xticks([])
             ax.set_yticks([])
-            
-        do_plot(ax1, 'c', 'figures/OT1_SIINFEKL.png')
-        do_plot(ax2, 'd', 'figures/B11_SIINFEKL.png')
-        do_plot(ax3, 'e', 'figures/B14_SIINFEKL.png')
+
+        do_plot(ax1, 'd', 'figures/OT1_SIINFEKL.png', 'OT1', crop_x=(2540, 4210), crop_y=(150, 2130))  # x x x x
+        do_plot(ax2, 'e', 'figures/B11_SIINFEKL.png', 'B11', crop_x=(2640, 4360), crop_y=(310, 2160))  # x x x x
+        do_plot(ax3, 'f', 'figures/B14_SIINFEKL.png', 'B14', crop_x=(2470, 4280), crop_y=(310, 2090))  # x y x x
+
+    def plot_3d_distances(self, fig, ax1, ax2, ax3):
+        def do_plot(ax, tcr):
+            dist = self.plot_data.distance_dict[tcr]
+            x_labels = [f'P{i + 1}' for i in range(8)]
+            plot = sns.heatmap(dist, square=True,
+                               vmin=self.plot_data.min_value, vmax=self.plot_data.max_value,
+                               xticklabels=x_labels, cbar=False, ax=ax)
+            if tcr == 'OT1':
+                tcr = 'OTI'
+            plot.set_xlabel(tcr)
+            plot.set_yticks([])
+            ax.tick_params(bottom=True, width=0.75)
+            plot_utils.add_axis_title_fixed_position(fig, ax, None)
+        do_plot(ax1, 'OT1')
+        do_plot(ax2, 'B11')
+        do_plot(ax3, 'B14')
 
     def plot(self):
         sns.set(context='paper', style='whitegrid')
@@ -168,23 +258,23 @@ class Plotter:
         sns.set_palette('colorblind')
         plot_utils.set_font_size(6)
 
-        fig = plt.figure(figsize=(self.textwidth, self.textwidth / 1.5),
+        fig = plt.figure(figsize=(self.textwidth, self.textwidth / 1.4),
                          dpi=self.dpi)
         gridspecs = {}
         axes = {}
         
-        gridspecs["gs_12345"] = mpl.gridspec.GridSpec(
+        gridspecs["gs_12345678"] = mpl.gridspec.GridSpec(
             figure=fig,
             nrows=2,
             ncols=1,
-            height_ratios=[1, 1],
+            height_ratios=[1, 1.3],
             width_ratios=[6],
             #wspace=0.1,
             #hspace=2/3,
         )
         
         gridspecs["gs_12"] = mpl.gridspec.GridSpecFromSubplotSpec(
-            subplot_spec=gridspecs["gs_12345"][0],
+            subplot_spec=gridspecs["gs_12345678"][0],
             nrows=1,
             ncols=2,
             height_ratios=[2],
@@ -195,23 +285,70 @@ class Plotter:
         axes["ax_1"] = fig.add_subplot(gridspecs["gs_12"][0])
         axes["ax_2"] = fig.add_subplot(gridspecs["gs_12"][1])
         
-        gridspecs["gs_345"] = mpl.gridspec.GridSpecFromSubplotSpec(
-            subplot_spec=gridspecs["gs_12345"][1],
+        gridspecs["gs_3456"] = mpl.gridspec.GridSpecFromSubplotSpec(
+            subplot_spec=gridspecs["gs_12345678"][1],
             nrows=1,
-            ncols=3,
+            ncols=4,
             height_ratios=[1],
-            width_ratios=[2, 2, 2],
-            #wspace=0.3,
+            width_ratios=[0.8, 2, 2, 2],
+            wspace=0.,
             #hspace=0.5,
         )
-        axes["ax_3"] = fig.add_subplot(gridspecs["gs_345"][0])
-        axes["ax_4"] = fig.add_subplot(gridspecs["gs_345"][1])
-        axes["ax_5"] = fig.add_subplot(gridspecs["gs_345"][2])
-        
+
+        gridspecs['gs_47'] = mpl.gridspec.GridSpecFromSubplotSpec(
+            subplot_spec=gridspecs["gs_3456"][1],
+            nrows=2,
+            ncols=1,
+            height_ratios=[1, 0.06],
+            width_ratios=[1],
+            hspace=0.02,
+        )
+        gridspecs['gs_58'] = mpl.gridspec.GridSpecFromSubplotSpec(
+            subplot_spec=gridspecs["gs_3456"][2],
+            nrows=2,
+            ncols=1,
+            height_ratios=[1, 0.06],
+            width_ratios=[1],
+            hspace=0.02,
+        )
+        gridspecs['gs_69'] = mpl.gridspec.GridSpecFromSubplotSpec(
+            subplot_spec=gridspecs["gs_3456"][3],
+            nrows=2,
+            ncols=1,
+            height_ratios=[1, 0.06],
+            width_ratios=[1],
+            hspace=0.02,
+        )
+
+        gridspecs['gs_3'] = mpl.gridspec.GridSpecFromSubplotSpec(
+            subplot_spec=gridspecs["gs_3456"][0],
+            nrows=1,
+            ncols=2,
+            height_ratios=[1],
+            width_ratios=[0.3, 1],
+            wspace=2.5,
+            # hspace=0.02,
+        )
+
+        axes["ax_3"] = fig.add_subplot(gridspecs['gs_3'][0])
+        axes["ax_31"] = fig.add_subplot(gridspecs['gs_3'][1])
+
+        axes["ax_4"] = fig.add_subplot(gridspecs["gs_47"][0])
+        axes["ax_5"] = fig.add_subplot(gridspecs["gs_58"][0])
+        axes["ax_6"] = fig.add_subplot(gridspecs["gs_69"][0])
+
+        axes["ax_7"] = fig.add_subplot(gridspecs["gs_47"][1])
+        axes["ax_8"] = fig.add_subplot(gridspecs["gs_58"][1])
+        axes["ax_9"] = fig.add_subplot(gridspecs["gs_69"][1])
+
         self.plot_permutation_importance(fig, axes['ax_1'])
         self.plot_position_importance(fig, axes['ax_2'])
-        self.plot_3d_structures(fig, axes['ax_3'], axes['ax_4'], axes['ax_5'])
-        
+
+        self.plot_avg_dist(fig, axes['ax_3'], axes['ax_31'])
+
+        self.plot_3d_structures(fig, axes['ax_4'], axes['ax_5'], axes['ax_6'])
+        self.plot_3d_distances(fig, axes['ax_7'], axes['ax_8'], axes['ax_9'])
+
         fig.tight_layout()
         fig.savefig('figures/manuscript_importance.pdf',
                     dpi=self.dpi, bbox_inches='tight')

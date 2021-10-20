@@ -135,16 +135,16 @@ class PlotData:
             'Spearman': correlation(method='spearman'),
         }
         
-        path_out = f'results/al/TEST_act_avg_8.json'
+        path_out = f'results/active_learning/within/FULL_act_avg_8_SIINFEKL.json'
         with open(path_out) as f:
             results_act_avg = json.load(f)
     
-        path_out = f'results/al/TEST_rdm_8.json'
+        path_out = f'results/active_learning/within/FULL_rdm_8_SIINFEKL.json'
         with open(path_out) as f:
             results_rdm = json.load(f) 
         
-        def read_greedy_bound(n):
-            path_in = f'results/al/test_set_within_{n}/'
+        def read_greedy_bound():
+            path_in = f'results/active_learning/within/greedy/'
             res_files = [path_in + f for f in os.listdir(path_in) if os.path.isfile(os.path.join(path_in, f))]
         
             results_upper = {}
@@ -157,7 +157,7 @@ class PlotData:
                 for mtc, vals in res_tmp.items():
                     results_upper[mtc] += vals
             return results_upper
-        results_upper = read_greedy_bound(8)
+        results_upper = read_greedy_bound()
         
         self.summary_8 = {
             'active_avg': results_act_avg,
