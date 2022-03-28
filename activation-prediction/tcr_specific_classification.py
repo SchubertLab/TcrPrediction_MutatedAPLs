@@ -37,7 +37,7 @@ def masked_groupby(df, cols):
 
 
 def tcr_specific_model_classification():
-    df = add_activation_thresholds(get_complete_dataset())
+    df = add_activation_thresholds(get_complete_dataset(epitope))
     data = df[(
         df['mut_pos'] >= 0
     ) & (
@@ -85,7 +85,9 @@ def tcr_specific_model_classification():
     return pdf
 
 
-fname = 'results/tcr_specific_classification_performance.csv.gz'
+epitope = 'VPSVWRSSL'
+
+fname = f'results/{epitope}_tcr_specific_classification_performance.csv.gz'
 if not os.path.exists(fname):
     print('computing results for the first time')
     pdf = tcr_specific_model_classification()
@@ -148,7 +150,7 @@ def do_test(feats, auc, **kwargs):
 
 g.map(do_test, 'reduced_features', 'auc')
 
-plt.savefig('figures/tcr_specific_feature_comparison.pdf', dpi=192)
+plt.savefig(f'figures/{epitope}_tcr_specific_feature_comparison.pdf', dpi=192)
 
 #%% metrics for each position
 pdf.loc[:, 'educated'] = np.where(pdf['tcr'].str.startswith('ED'),
@@ -212,7 +214,7 @@ plt.gcf().legend(*zip(*[
 
 plt.tight_layout()
 sns.despine()
-plt.savefig('figures/tcr_specific_activation_aucs_reduced_feats.pdf', dpi=192)
+plt.savefig(f'figures/{epitope}_tcr_specific_activation_aucs_reduced_feats.pdf', dpi=192)
 
 
 # %% roc curves for AS / 46.9
@@ -254,7 +256,7 @@ for i, (tcr, g) in enumerate(groups):
 
 plt.tight_layout()
 sns.despine()
-plt.savefig('figures/tcr_specific_activation_AS_auroc_auprc_reduced_features.pdf', dpi=192)
+plt.savefig(f'figures/{epitope}_tcr_specific_activation_AS_auroc_auprc_reduced_features.pdf', dpi=192)
 
 #%% roc curves AS/46.9 all together
 
@@ -314,7 +316,7 @@ ax2.set_ylabel('Average Precision Score')
 fig.tight_layout()
 sns.despine()
 
-plt.savefig('figures/tcr_specific_all_aucs_together.pdf', dpi=300)
+plt.savefig(f'figures/{epitope}_tcr_specific_all_aucs_together.pdf', dpi=300)
 
 #%% comparing thresholds and normalizations
 
@@ -368,4 +370,4 @@ def annot(x, y, color, data):
 
 g.map_dataframe(annot, 'threshold', 'value')
 
-plt.savefig('figures/tcr_specific_thr_vs_norm_reduced_features.pdf', dpi=192)
+plt.savefig(f'figures/{epitope}_tcr_specific_thr_vs_norm_reduced_features.pdf', dpi=192)

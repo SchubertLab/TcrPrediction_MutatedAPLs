@@ -14,7 +14,7 @@ from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
 from sklearn.model_selection import KFold, ShuffleSplit
 from tqdm import tqdm
 
-from preprocessing import full_aa_features, get_aa_features, get_dataset
+from preprocessing import full_aa_features, get_aa_features, get_dataset, get_tumor_dataset
 
 
 def tcr_specific_model(
@@ -109,10 +109,15 @@ def split_leave_r_out(test_size, n_splits):
     return split
 
 
-fname = 'results/tcr_specific_data_size.csv.gz'
+epitope = 'VPSVWRSSL'
+fname = f'results/{epitope}_tcr_specific_data_size.csv.gz'
 if not os.path.exists(fname):
     print('computing results for the first time')
-    data = get_dataset(normalization='AS').query('mut_pos >= 0')
+    if epitope == 'VPSVWRSSL':
+        data = get_tumor_dataset()
+    else:
+        data = get_dataset(normalization='AS')
+    data = data.query('mut_pos >= 0')
     data['is_activated'] = data['activation'] > 46.9
     data = data[(
         data['mut_pos'] >= 0
@@ -208,8 +213,8 @@ for ax in g.axes_dict.values():
     ax.tick_params(axis='x', rotation=90)
 g.set_titles(col_template="{col_name}")
 g.add_legend(loc='lower left')
-g.savefig('figures/validation-spearman-by-split-together.pdf', dpi=192)
-g.savefig('figures/validation-spearman-by-split-together.png', dpi=300)
+g.savefig(f'figures/{epitope}_validation-spearman-by-split-together.pdf', dpi=192)
+g.savefig(f'figures/{epitope}_validation-spearman-by-split-together.png', dpi=300)
 
 
 # %% compare lmo metrics across tcrs
@@ -231,7 +236,7 @@ for k, ax in g.axes_dict.items():
     #    ax.set_xlim(0, 1)
     pass
 
-g.savefig('figures/validation-metrics-by-tcr.pdf', dpi=192)
+g.savefig(f'figures/{epitope}_validation-metrics-by-tcr.pdf', dpi=192)
 
 # %% find which amino acids are harder to predict
 
@@ -264,7 +269,7 @@ g = sns.catplot(
 g.axes_dict['AS', 'R2'].set(ylim=(-0.25, 1))
 g.axes_dict['AS', 'Pearson'].set(ylim=(-0.25, 1))
 g.axes_dict['AS', 'Spearman'].set(ylim=(-0.25, 1))
-plt.savefig('figures/metrics-by-left-out-amino.pdf', dpi=192)
+plt.savefig(f'figures/{epitope}_metrics-by-left-out-amino.pdf', dpi=192)
 
 # %%
 
@@ -290,7 +295,7 @@ g.axes_dict['AS', 'R2'].set(ylim=(-0.25, 1))
 g.axes_dict['AS', 'Pearson'].set(ylim=(-0.25, 1))
 g.axes_dict['AS', 'Spearman'].set(ylim=(-0.25, 1))
 g.add_legend()
-plt.savefig('figures/left-out-amino-metric-vs-activation-std.pdf', dpi=192)
+plt.savefig(f'figures/{epitope}_left-out-amino-metric-vs-activation-std.pdf', dpi=192)
 
 # %%
 print(
@@ -343,7 +348,7 @@ g.set(xticklabels=[f'P{i+1}' for i in range(8)],
 #g.axes_dict['AS', 'Pearson'].set(ylim=(-0.25, 1))
 #g.axes_dict['AS', 'Spearman'].set(ylim=(-0.25, 1))
 plt.tight_layout()
-plt.savefig('figures/metrics-by-left-out-position.pdf', dpi=300,
+plt.savefig(f'figures/{epitope}_metrics-by-left-out-position.pdf', dpi=300,
             bbox_inches='tight')
 
 # %% regression lines for all lmo features and all tcrs
@@ -367,4 +372,4 @@ g = sns.lmplot(
     col_order=order
 )
 #g.set(xlim=(0, 80), ylim=(0, 80))
-plt.savefig('figures/tcr_specific_regression_lmo_features.pdf', dpi=192)
+plt.savefig(f'figures/{epitope}_tcr_specific_regression_lmo_features.pdf', dpi=192)

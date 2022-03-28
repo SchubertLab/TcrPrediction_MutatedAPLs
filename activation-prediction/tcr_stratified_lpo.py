@@ -21,7 +21,7 @@ from tqdm import tqdm
 from preprocessing import (add_activation_thresholds, build_feature_groups,
                            decorrelate_groups, full_aa_features,
                            get_aa_factors, get_aa_features,
-                           get_complete_dataset, get_dataset)
+                           get_complete_dataset, get_dataset, get_tumor_dataset)
 
 #%%
 
@@ -43,7 +43,10 @@ aa_features = get_aa_features()[['factors']]
 #%% training and evaluation
 
 def train():
-    df = get_dataset(normalization='AS')
+    if epitope == 'VPSVWRSSL':
+        df = get_tumor_dataset()
+    else:
+        df = get_dataset(normalization='AS')
 
     tdf = df[(
         df['mut_pos'] >= 0
@@ -91,7 +94,8 @@ def train():
 
 
 #%%
-fname = 'results/tcr_stratified_leave_position_out_performance.csv.gz'
+epitope = 'VPSVWRSSL'
+fname = f'results/{epitope}_tcr_stratified_leave_position_out_performance.csv.gz'
 if not os.path.exists(fname):
     pdf = train()
     pdf.to_csv(fname, index=False)
@@ -138,5 +142,5 @@ g.set(
 )
 
 plt.tight_layout()
-plt.savefig('figures/tcr_stratified_leave_position_out_performance.pdf', dpi=300,
+plt.savefig(f'figures/{epitope}_tcr_stratified_leave_position_out_performance.pdf', dpi=300,
             bbox_inches='tight')

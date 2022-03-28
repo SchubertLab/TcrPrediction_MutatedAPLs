@@ -36,7 +36,7 @@ def masked_groupby(df, cols):
 
 
 def train():
-    df = add_activation_thresholds(get_complete_dataset())
+    df = add_activation_thresholds(get_complete_dataset(epitope))
 
     tdf = df[(
         df['mut_pos'] >= 0
@@ -89,8 +89,9 @@ def train():
 
     return ppdf
 
+epitope = 'VPSVWRSSL'
 
-fname = 'results/tcr_stratified_classification_performance.csv.gz'
+fname = f'results/{epitope}_tcr_stratified_classification_performance.csv.gz'
 if not os.path.exists(fname):
     pdf = train()
     pdf.to_csv(fname, index=False)
@@ -157,7 +158,7 @@ def do_test(feats, auc, **kwargs):
 
 g.map(do_test, 'reduced_features', 'auc')
 
-plt.savefig('figures/tcr_stratified_feature_comparison.pdf', dpi=192)
+plt.savefig(f'figures/{epitope}_tcr_stratified_feature_comparison.pdf', dpi=192)
 
 
 #%% all aucs together
@@ -204,8 +205,8 @@ plt.legend([
 
 plt.tight_layout()
 sns.despine()
-plt.savefig('figures/tcr_stratified_activation_AS_auroc_together.pdf', dpi=192)
-plt.savefig('figures/tcr_stratified_activation_AS_auroc_together.png', dpi=192)
+plt.savefig(f'figures/{epitope}_tcr_stratified_activation_AS_auroc_together.pdf', dpi=192)
+plt.savefig(f'figures/{epitope}_tcr_stratified_activation_AS_auroc_together.png', dpi=192)
 
 # %% roc auc curves for all thresholds / normalization combinations
 
@@ -251,7 +252,7 @@ plt.gcf().legend(*zip(*[
 
 plt.tight_layout()
 sns.despine()
-plt.savefig('figures/tcr_stratified_activation_aucs.pdf', dpi=192)
+plt.savefig(f'figures/{epitope}_tcr_stratified_activation_aucs.pdf', dpi=192)
 
 # %% roc curves for AS / 46.9
 
@@ -292,7 +293,7 @@ for i, (tcr, g) in enumerate(groups):
 
 plt.tight_layout()
 sns.despine()
-plt.savefig('figures/tcr_stratified_activation_AS_auroc_auprc.pdf', dpi=192)
+plt.savefig(f'figures/{epitope}_tcr_stratified_activation_AS_auroc_auprc.pdf', dpi=192)
 
 
 #%% comparing thresholds and normalizations
@@ -348,6 +349,6 @@ def annot(x, y, color, data):
 
 g.map_dataframe(annot, 'threshold', 'value')
 
-plt.savefig('figures/tcr_stratified_thr_vs_norm.pdf', dpi=192)
+plt.savefig(f'figures/{epitope}_tcr_stratified_thr_vs_norm.pdf', dpi=192)
 
 

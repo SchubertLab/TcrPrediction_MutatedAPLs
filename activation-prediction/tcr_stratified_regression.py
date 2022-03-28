@@ -14,12 +14,15 @@ from sklearn import metrics
 from sklearn.ensemble import RandomForestRegressor
 from tqdm import tqdm
 
-from preprocessing import full_aa_features, get_aa_features, get_dataset
+from preprocessing import full_aa_features, get_aa_features, get_dataset, get_tumor_dataset
 
 # %% training and evaluation
 
 def train():
-    df = get_dataset(normalization='AS')
+    if epitope == 'VPSVWRSSL':
+        df = get_tumor_dataset()
+    else:
+        df = get_dataset(normalization='AS')
     tdf = df[(
         df['mut_pos'] >= 0
     ) & (
@@ -71,8 +74,8 @@ def train():
 
     return ppdf
 
-
-fname = 'results/tcr_stratified_regression_performance.csv.gz'
+epitope = 'VPSVWRSSL'
+fname = f'results/{epitope}_tcr_stratified_regression_performance.csv.gz'
 if not os.path.exists(fname):
     pdf = train()
     pdf.to_csv(fname, index=False)
@@ -123,7 +126,7 @@ g = sns.lmplot(
 
 #g.set(xlim=(-1, 90), ylim=(-1, 90))
 
-plt.savefig('figures/tcr_stratified_activation_regression_AS.pdf', dpi=192)
+plt.savefig(f'figures/{epitope}_tcr_stratified_activation_regression_AS.pdf', dpi=192)
 
 #%%
 
@@ -134,5 +137,5 @@ q.columns = q.columns.get_level_values(1)
 
 sns.pairplot(q)
 
-plt.savefig('figures/tcr_stratified_spearman_by_norm.pdf', dpi=192)
+plt.savefig(f'figures/{epitope}_tcr_stratified_spearman_by_norm.pdf', dpi=192)
 

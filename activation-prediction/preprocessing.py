@@ -116,8 +116,6 @@ def get_cdr_sequences_tumor(alignment_type='muscle'):
         raise ValueError('unknown CDR3 alignment (valid choices: muscle, imgt)')
 
     # merge and return
-    print(cadf)
-    print(df_tumor)
     tdf = df_tumor.merge(cadf, how='outer').merge(cbdf, how='outer')
     return tdf.reset_index(drop=True)
 
@@ -252,7 +250,10 @@ def get_tumor_dataset(cdr3_alignment_type='muscle', base_peptide='VPSVWRSSL'):
     return df.reset_index(drop=True)
 
 
-def get_complete_dataset():
+def get_complete_dataset(epitope):
+    if epitope == 'VPSVWRSSL':
+        return get_tumor_dataset()
+
     dfs = []
 
     for edu in [True, False]:
