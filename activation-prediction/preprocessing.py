@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
+import os
 import numpy as np
 import pandas as pd
 from sklearn.decomposition import PCA
@@ -32,9 +33,10 @@ def read_fasta(fname):
 
 
 def get_cdr_sequences(alignment_type='muscle'):
+    path_base = os.path.dirname(__file__)
     # naive repertoire
     ntdf = pd.read_csv(
-        '../data/naive repertoire SIINFEKL APL landscape data V2 TCR INFO.csv'
+        os.path.join(path_base, '../data/naive repertoire SIINFEKL APL landscape data V2 TCR INFO.csv')
     )
     ntdf['tcr'] = ntdf['sample id (TCR)'].apply(
         lambda s: s.split('_')[3] if '_' in s else s.replace('-', '')
@@ -47,7 +49,7 @@ def get_cdr_sequences(alignment_type='muscle'):
 
     # educated repertoire
     etdf = pd.read_excel(
-        '../data/Educated_repertoire_derived_TCRs_CDR3a_b_TCRa_b.xlsx'
+        os.path.join(path_base, '../data/Educated_repertoire_derived_TCRs_CDR3a_b_TCRa_b.xlsx')
     )[[
         'TCR', 'CDR3b', 'CDR3a'
     ]].rename(columns={
@@ -57,16 +59,16 @@ def get_cdr_sequences(alignment_type='muscle'):
 
     # alignment
     if alignment_type == 'muscle':
-        cadf = pd.DataFrame(read_fasta('../data/cdr3a-aligned.fasta').items(),
+        cadf = pd.DataFrame(read_fasta(os.path.join(path_base, '../data/cdr3a-aligned.fasta')).items(),
                             columns=['tcr', 'cdr3a_aligned'])
     
-        cbdf = pd.DataFrame(read_fasta('../data/cdr3b-aligned.fasta').items(),
+        cbdf = pd.DataFrame(read_fasta(os.path.join(path_base, '../data/cdr3b-aligned.fasta')).items(),
                             columns=['tcr', 'cdr3b_aligned'])
     elif alignment_type == 'imgt':
-        cadf = pd.DataFrame(read_fasta('../data/cdr3a-aligned-imgt.fasta').items(),
+        cadf = pd.DataFrame(read_fasta(os.path.join(path_base, '../data/cdr3a-aligned-imgt.fasta')).items(),
                             columns=['tcr', 'cdr3a_aligned'])
     
-        cbdf = pd.DataFrame(read_fasta('../data/cdr3b-aligned-imgt.fasta').items(),
+        cbdf = pd.DataFrame(read_fasta(os.path.join(path_base, '../data/cdr3b-aligned-imgt.fasta')).items(),
                             columns=['tcr', 'cdr3b_aligned'])
     else:
         raise ValueError('unknown CDR3 alignment (valid choices: muscle, imgt)')
@@ -89,6 +91,37 @@ def get_cdr_sequences(alignment_type='muscle'):
     return tdf.reset_index(drop=True)
 
 
+def get_cdr_sequences_tumor(alignment_type='muscle'):
+    path_base = ''#os.path.dirname(__file__)
+    df_tumor = pd.read_excel(os.path.join('', '../data/Data_summary_RNF43.xlsx'), 'Sequences')
+    df_tumor = df_tumor.rename(columns={'Unnamed: 0': 'tcr',
+                                        'CDR3beta': 'cdr3b',
+                                        'CDR3alpha': 'cdr3a'})
+    df_tumor = df_tumor[['tcr', 'cdr3a', 'cdr3b']]
+
+    # alignment
+    if alignment_type == 'muscle':
+        cadf = pd.DataFrame(read_fasta(os.path.join(path_base, '../data/cdr3a-aligned_tumor.fasta')).items(),
+                            columns=['tcr', 'cdr3a_aligned'])
+
+        cbdf = pd.DataFrame(read_fasta(os.path.join(path_base, '../data/cdr3b-aligned_tumor.fasta')).items(),
+                            columns=['tcr', 'cdr3b_aligned'])
+    elif alignment_type == 'imgt':
+        cadf = pd.DataFrame(read_fasta(os.path.join(path_base, '../data/cdr3a-aligned-imgt_tumor.fasta')).items(),
+                            columns=['tcr', 'cdr3a_aligned'])
+
+        cbdf = pd.DataFrame(read_fasta(os.path.join(path_base, '../data/cdr3b-aligned-imgt_tumor.fasta')).items(),
+                            columns=['tcr', 'cdr3b_aligned'])
+    else:
+        raise ValueError('unknown CDR3 alignment (valid choices: muscle, imgt)')
+
+    # merge and return
+    print(cadf)
+    print(df_tumor)
+    tdf = df_tumor.merge(cadf, how='outer').merge(cbdf, how='outer')
+    return tdf.reset_index(drop=True)
+
+
 def get_dataset(educated_repertoire=None, normalization=None,
                 cdr3_alignment_type='muscle'):
     if educated_repertoire is None:
@@ -97,10 +130,11 @@ def get_dataset(educated_repertoire=None, normalization=None,
             get_dataset(False, normalization, cdr3_alignment_type),
         ]).reset_index(drop=True)
 
+    path_base = os.path.dirname(__file__)
     if educated_repertoire:
-        fname = '../data/PH_data_educated_repertoire_and_OTI.xlsx'
+        fname = os.path.join(path_base, '../data/PH_data_educated_repertoire_and_OTI.xlsx')
     else:
-        fname = '../data/LR_data_naive_repertoire_and_OTI.xlsx'
+        fname = os.path.join(path_base, '../data/LR_data_naive_repertoire_and_OTI.xlsx')
 
     if normalization is None:
         sheet = 'Unnormalized Data'
@@ -164,6 +198,57 @@ def get_dataset(educated_repertoire=None, normalization=None,
 
     df['normalization'] = normalization or 'none'
 
+    return df.reset_index(drop=True)
+
+
+def get_tumor_dataset(cdr3_alignment_type='muscle', base_peptide='VPSVWRSSL'):
+    path_base = ''  # os.path.dirname(__file__)
+    fname = os.path.join(path_base, '../data/Data_summary_RNF43.xlsx')
+
+    df = pd.read_excel(fname, 'Mean')
+
+    # unpack the columns into each tcr
+    dds = []
+    for i in range(4, 11):
+        d = df.iloc[:, [3, i]].copy()
+        d.columns = ['epitope', 'activation']
+        d['tcr'] = df.columns[i].upper()
+        dds.append(d)
+    df = pd.concat(dds)
+
+    # convert apl to mutation position and amino acid
+    def get_mutation(apl, do_position=True):
+        for i, let in enumerate(apl):
+            if let != base_peptide[i]:
+                if do_position:
+                    return i
+                else:
+                    return let
+        if do_position:
+            return -1
+        else:
+            return None
+
+    df['mut_pos'] = df['epitope'].apply(lambda x: get_mutation(x, True))
+    df['mut_ami'] = df['epitope'].apply(lambda x: get_mutation(x, False))
+    df['orig_ami'] = df['mut_pos'].apply(lambda x: base_peptide[x] if x >= 0 else None)
+
+    # add cdr sequences
+    df = df.merge(get_cdr_sequences_tumor(cdr3_alignment_type), on='tcr', how='left')
+
+    # compute residual
+    df = df.merge(
+        # wild-type activation for each tcr
+        df.query('mut_pos < 0')[[
+            'tcr', 'activation'
+        ]].rename(columns={
+            'activation': 'wild_activation'
+        }),
+        on='tcr'
+    )
+    df['residual'] = df['activation'] - df['wild_activation']
+
+    df['normalization'] = 'none'
     return df.reset_index(drop=True)
 
 
