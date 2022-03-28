@@ -38,7 +38,7 @@ def train():
     # disable parallel processing if running from within spyder
     n_jobs = 1 if 'SPY_PYTHONPATH' in os.environ else -1
 
-    fit_data = full_aa_features(tdf, aa_features, include_tcr=True)
+    fit_data = full_aa_features(tdf, aa_features, include_tcr=True, base_peptide=epitope)
     print('total features', fit_data.shape[1])
 
     perf = []

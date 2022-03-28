@@ -58,7 +58,7 @@ def train():
     tdf['is_activated'] = tdf['activation'] > 46.9
 
     aa_features = get_aa_features()[['factors']]
-    fit_data = full_aa_features(tdf, aa_features, include_tcr=True)
+    fit_data = full_aa_features(tdf, aa_features, include_tcr=True, base_peptide=epitope)
 
     # disable parallel processing if running from within spyder
     n_jobs = 1 if 'SPY_PYTHONPATH' in os.environ else -1

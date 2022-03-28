@@ -536,7 +536,7 @@ class FeatureMaker:
 
 def full_aa_features(fit_data, aa_features, interactions=False,
                      include_tcr=False, include_mutation=True,
-                     remove_constant=False):
+                     remove_constant=False, base_peptide='SIINFEKL'):
 
     fs = aa_features
     if interactions:
@@ -558,11 +558,11 @@ def full_aa_features(fit_data, aa_features, interactions=False,
             feats.add_sample_features(f'epi_{i}', fs.loc[a])
 
         # wild type
-        for i, a in enumerate('SIINFEKL'):
+        for i, a in enumerate(base_peptide):
             feats.add_sample_features(f'wild_{i}', fs.loc[a])
 
         # difference between the two
-        for i, (a1, a2) in enumerate(zip('SIINFEKL', row['epitope'].strip())):
+        for i, (a1, a2) in enumerate(zip(base_peptide, row['epitope'].strip())):
             feats.add_sample_features(f'diff_{i}', fs.loc[a1] - fs.loc[a2])
 
         # aligned TCRs

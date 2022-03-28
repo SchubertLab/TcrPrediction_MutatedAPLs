@@ -49,7 +49,7 @@ def tcr_specific_model_classification():
     group_keys = ['normalization', 'threshold', 'tcr']
     for reduce_feats in [False, True]:
         feats = aa_features if reduce_feats else aa_features[['factors']]
-        train_data = full_aa_features(data, feats)
+        train_data = full_aa_features(data, feats, base_peptides=epitope)
         print('training on', train_data.shape[1], 'features')
 
         for _, fit_mask in tqdm(masked_groupby(data, group_keys)):

@@ -54,7 +54,7 @@ def train():
     perf = []
     for reduce_feats in [False, True]:
         feats = aa_features if reduce_feats else aa_features[['factors']]
-        fit_data = full_aa_features(tdf, feats, include_tcr=True)
+        fit_data = full_aa_features(tdf, feats, include_tcr=True, base_peptide=epitope)
         print('training on', fit_data.shape[1], 'features')
         
         for _, data_mask in tqdm(masked_groupby(tdf, ['normalization', 'threshold'])):

@@ -130,7 +130,7 @@ if not os.path.exists(fname):
     )]
     
     aa_features = get_aa_features()
-    train_data = full_aa_features(data, aa_features[['factors']])
+    train_data = full_aa_features(data, aa_features[['factors']], base_peptide=epitope)
 
     ppdf = pd.concat([
         tcr_specific_model(
