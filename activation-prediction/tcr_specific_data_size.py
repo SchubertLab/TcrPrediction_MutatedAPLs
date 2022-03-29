@@ -90,7 +90,7 @@ def split_leave_one_out(data):
 
 
 def split_leave_position_out(data):
-    for p in range(8):
+    for p in range(len(epitope)):
         train_idx = np.flatnonzero(data['mut_pos'] != p)
         vali_idx = np.flatnonzero(data['mut_pos'] == p)
         yield train_idx, vali_idx
@@ -130,7 +130,10 @@ if not os.path.exists(fname):
     )]
     
     aa_features = get_aa_features()
-    train_data = full_aa_features(data, aa_features[['factors']], base_peptide=epitope)
+    train_data = full_aa_features(data, aa_features[['factors', 'one_hot']], base_peptide=epitope)
+
+    tcr_specific_model(data, train_data, split_leave_amino_out,
+                       experiment_name='lao')
 
     ppdf = pd.concat([
         tcr_specific_model(
@@ -332,7 +335,7 @@ g = sns.catplot(
     #hue='Is Educated',
     sharey=False,
     #margin_titles=True,
-    order=range(8),
+    order=range(len(epitope)),
     height=3.5,
     palette='husl',
     zorder=2,
@@ -341,7 +344,7 @@ g = sns.catplot(
     meanprops={'mfc': 'k', 'mec': 'k'}
 )
 
-g.set(xticklabels=[f'P{i+1}' for i in range(8)],
+g.set(xticklabels=[f'P{i+1}' for i in range(len(epitope))],
       xlabel='Validate on position',
       ylabel='AUC for educated repertoire')
 #g.axes_dict['AS', 'R2'].set(ylim=(-0.25, 1))
@@ -362,7 +365,7 @@ g = sns.lmplot(
     y='pred',
     hue='mut_pos',
     col='tcr',
-    col_wrap=8,
+    col_wrap=len(epitope),
     ci=None,
     robust=True,
     sharex=True,

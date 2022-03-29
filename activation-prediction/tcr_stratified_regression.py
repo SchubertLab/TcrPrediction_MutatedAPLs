@@ -75,6 +75,8 @@ def train():
     return ppdf
 
 epitope = 'VPSVWRSSL'
+default_activation = 'none'
+
 fname = f'results/{epitope}_tcr_stratified_regression_performance.csv.gz'
 if not os.path.exists(fname):
     pdf = train()
@@ -114,14 +116,14 @@ g = sns.lmplot(
     hue='mut_pos',
     col='tcr',
     col_order=tcr_order,
-    col_wrap=8,
+    col_wrap=len(epitope),
     ci=None,
     robust=True,
     sharex=True,
     sharey=True,
     palette='husl',
     height=2,
-    data=pdf.query('normalization=="AS"')
+    data=pdf.query(f'normalization=="{default_activation}"')
 )
 
 #g.set(xlim=(-1, 90), ylim=(-1, 90))

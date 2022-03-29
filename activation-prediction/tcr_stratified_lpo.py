@@ -65,13 +65,14 @@ def train():
 
     perf = []
     for test_tcr in tqdm(tdf['tcr'].unique(), ncols=50):
-        for test_pos in range(8):
+        for test_pos in range(len(epitope)):
             test_mask = (tdf['tcr'] == test_tcr) & (tdf['mut_pos'] == test_pos)
             train_mask = (tdf['tcr'] != test_tcr) & (tdf['mut_pos'] != test_pos)
-    
+            #print(tdf['mut_pos'])
             xtrain = fit_data.loc[train_mask]
             ytrain = tdf.loc[train_mask, 'is_activated']
-    
+            if np.sum(test_mask) == 0:
+                continue
             # train and predict
             reg = RandomForestClassifier(
                 n_estimators=250,
@@ -136,7 +137,7 @@ g = sns.catplot(
 
 
 g.set(
-    xticklabels=[f'P{i+1}' for i in range(8)],
+    xticklabels=[f'P{i+1}' for i in pp['mut_pos'].unique()],
     xlabel='Validate on position',
     ylabel='AUC',
 )

@@ -211,7 +211,7 @@ plt.savefig(f'figures/{epitope}_tcr_stratified_activation_AS_auroc_together.png'
 # %% roc auc curves for all thresholds / normalization combinations
 
 ntcrs = len(pdf['tcr'].unique())
-ncols = 8
+ncols = len(epitope)
 height = 2
 nrows = ntcrs // ncols + 1
 cm = plt.get_cmap('tab20c')
@@ -257,7 +257,7 @@ plt.savefig(f'figures/{epitope}_tcr_stratified_activation_aucs.pdf', dpi=192)
 # %% roc curves for AS / 46.9
 
 ntcrs = len(pdf['tcr'].unique())
-ncols = 8
+ncols = len(epitope)
 height = 2
 nrows = ntcrs // ncols + 1
 

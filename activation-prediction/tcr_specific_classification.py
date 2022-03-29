@@ -49,7 +49,7 @@ def tcr_specific_model_classification():
     group_keys = ['normalization', 'threshold', 'tcr']
     for reduce_feats in [False, True]:
         feats = aa_features if reduce_feats else aa_features[['factors']]
-        train_data = full_aa_features(data, feats, base_peptides=epitope)
+        train_data = full_aa_features(data, feats, base_peptide=epitope)
         print('training on', train_data.shape[1], 'features')
 
         for _, fit_mask in tqdm(masked_groupby(data, group_keys)):
@@ -172,7 +172,7 @@ sns.catplot(
 # %% separate roc curves
 
 ntcrs = len(pdf['tcr'].unique())
-ncols = 8
+ncols = len(epitope)
 height = 2
 nrows = ntcrs // ncols + 1
 cm = plt.get_cmap('tab20c')
@@ -220,7 +220,7 @@ plt.savefig(f'figures/{epitope}_tcr_specific_activation_aucs_reduced_feats.pdf',
 # %% roc curves for AS / 46.9
 
 ntcrs = len(pdf['tcr'].unique())
-ncols = 8
+ncols = len(epitope)
 height = 2
 nrows = ntcrs // ncols + 1
 
