@@ -86,6 +86,7 @@ def tcr_specific_model_classification():
 
 
 epitope = 'VPSVWRSSL'
+default_activation = 'none'
 
 fname = f'results/{epitope}_tcr_specific_classification_performance.csv.gz'
 if not os.path.exists(fname):
@@ -157,7 +158,7 @@ pdf.loc[:, 'educated'] = np.where(pdf['tcr'].str.startswith('ED'),
                                   'educated', 'naive')
 sns.catplot(
     data=pdf[(
-        pdf['normalization'] == 'AS'
+        pdf['normalization'] == default_activation
     ) & (
         pdf['threshold'] == 46.9
     ) & (
@@ -225,7 +226,7 @@ height = 2
 nrows = ntcrs // ncols + 1
 
 plt.figure(figsize=(ncols * height, nrows * height))
-groups = pdf.query('reduced_features & normalization == "AS" & threshold == 46.9').groupby('tcr')
+groups = pdf.query(f'reduced_features & normalization == "{default_activation}" & threshold == 46.9').groupby('tcr')
 for i, (tcr, g) in enumerate(groups):
     plt.subplot(nrows, ncols, i + 1)
 
@@ -260,17 +261,14 @@ plt.savefig(f'figures/{epitope}_tcr_specific_activation_AS_auroc_auprc_reduced_f
 
 #%% roc curves AS/46.9 all together
 
-aucs = pp.query('reduced_features == "redux" & normalization == "AS" & threshold == 46.9')
+aucs = pp.query(f'reduced_features == "redux" & normalization == "{default_activation}" & threshold == 46.9')
 aucs.loc[:, 'repertoire'] = np.where(aucs['tcr'].str.startswith('ED'),
                                      'educated', 'naive')
-
-worst_edu, worst_nai = aucs.set_index('tcr').groupby('repertoire')['auc'].idxmin()
-best_edu, best_nai = aucs.set_index('tcr').groupby('repertoire')['auc'].idxmax()
 
 fig, (ax, ax2) = plt.subplots(1, 2, figsize=(5, 3.5),
                               gridspec_kw={'width_ratios': [3, 1.75]})
 cm = plt.get_cmap('tab20')
-groups = pdf.query('reduced_features & normalization == "AS" & threshold == 46.9').groupby('tcr')
+groups = pdf.query(f'reduced_features & normalization == "{default_activation}" & threshold == 46.9').groupby('tcr')
 for i, (tcr, g) in enumerate(groups):
     fpr, tpr, _ = metrics.roc_curve(g['is_activated'], g['pred'])
     pre, rec, _ = metrics.precision_recall_curve(g['is_activated'], g['pred'])
@@ -279,13 +277,15 @@ for i, (tcr, g) in enumerate(groups):
     aps = metrics.average_precision_score(g['is_activated'], g['pred'])
 
     try:
+        worst_edu, worst_nai = aucs.set_index('tcr').groupby('repertoire')['auc'].idxmin()
+        best_edu, best_nai = aucs.set_index('tcr').groupby('repertoire')['auc'].idxmax()
         idx = (best_edu, worst_edu, best_nai, worst_nai).index(tcr)
         kwargs={
             'c': f'C{idx // 2}',
             'label': f'{tcr} ({aps:.3f})',
             'linestyle': '--' if idx % 2 else '-',
         }
-    except ValueError:
+    except:
         kwargs = {'c': 'gray', 'alpha': 0.3}
 
     #ax.plot(fpr, tpr, **kwargs)
@@ -306,7 +306,7 @@ ax.set_xlabel('Recall')
 pp.loc[:, 'Repertoire'] = np.where(pp['tcr'].str.startswith('ED'),
                                     'Educated', 'Naive')
 sns.boxplot(
-    data=pp.query('normalization == "AS" & threshold == 46.9 & reduced_features == "redux"'),
+    data=pp.query(f'normalization == "{default_activation}" & threshold == 46.9 & reduced_features == "redux"'),
     y='aps', x='Repertoire', ax=ax2
 )
 

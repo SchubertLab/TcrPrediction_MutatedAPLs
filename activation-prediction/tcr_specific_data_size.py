@@ -34,6 +34,9 @@ def tcr_specific_model(
             fit_mask = (data['normalization'] == n) & (data['tcr'] == t)
             fit_data = train_data[fit_mask]
 
+            if not train_mask.any() or not test_mask.any():
+                continue
+                
             split = split_fn(fit_data)
             for i, (train_idx, test_idx) in enumerate(split):
                 xtrain = fit_data.iloc[train_idx]
