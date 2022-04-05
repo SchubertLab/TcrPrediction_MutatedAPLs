@@ -92,8 +92,8 @@ def get_cdr_sequences(alignment_type='muscle'):
 
 
 def get_cdr_sequences_tumor(alignment_type='muscle'):
-    path_base = ''#os.path.dirname(__file__)
-    df_tumor = pd.read_excel(os.path.join('', '../data/Data_summary_RNF43.xlsx'), 'Sequences')
+    path_base = os.path.dirname(__file__)
+    df_tumor = pd.read_excel(os.path.join(path_base, '../data/Data_summary_RNF43.xlsx'), 'Sequences')
     df_tumor = df_tumor.rename(columns={'Unnamed: 0': 'tcr',
                                         'CDR3beta': 'cdr3b',
                                         'CDR3alpha': 'cdr3a'})
@@ -200,7 +200,7 @@ def get_dataset(educated_repertoire=None, normalization=None,
 
 
 def get_tumor_dataset(cdr3_alignment_type='muscle', base_peptide='VPSVWRSSL'):
-    path_base = ''  # os.path.dirname(__file__)
+    path_base = os.path.dirname(__file__)
     fname = os.path.join(path_base, '../data/Data_summary_RNF43.xlsx')
 
     df = pd.read_excel(fname, 'Mean')
