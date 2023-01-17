@@ -7,6 +7,7 @@
 import os
 import sys
 from functools import reduce
+import argparse
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -37,7 +38,7 @@ def masked_groupby(df, cols):
 
 
 def tcr_specific_model_classification():
-    df = add_activation_thresholds(get_complete_dataset(epitope))
+    df = add_activation_thresholds(get_complete_dataset(epitope), epitope=epitope)
     data = df[(
         df['mut_pos'] >= 0
     ) & (
@@ -85,20 +86,27 @@ def tcr_specific_model_classification():
     return pdf
 
 
-epitope = 'VPSVWRSSL'
-default_activation = 'none'
+parser = argparse.ArgumentParser()
+parser.add_argument('--epitope', type=str, default='SIINFEKL')
+parser.add_argument('--activation', type=str, default='AS')
+parser.add_argument('--threshold', type=float, default=46.9)
+params = parser.parse_args()
+
+epitope = params.epitope
+default_activation = params.activation
+default_threshold = params.threshold
 
 fname = f'results/{epitope}_tcr_specific_classification_performance.csv.gz'
 if not os.path.exists(fname):
     print('computing results for the first time')
     pdf = tcr_specific_model_classification()
     pdf.to_csv(fname, index=False)
+    pdf['threshold'] = pdf['threshold'].astype(float)
 else:
     print('using cached results')
     pdf = pd.read_csv(fname)
 
 #%% comparing normalizations
-
 pp = pdf.groupby(
     ['reduced_features', 'normalization', 'tcr', 'threshold'], as_index=False
 ).apply(lambda q: pd.Series({
@@ -112,20 +120,32 @@ pp.loc[:, 'reduced_features'] = np.where(pp['reduced_features'], 'redux', 'full'
 
     
 #%% are reduced features better?
-
-g = sns.catplot(
-    data=pp[(
-        (pp['normalization'] == 'AS') & (pp['threshold'] == 46.9)
-    ) | (
-        (pp['normalization'] == 'OT1') & (pp['threshold'] == 66.8)
-    ) | (
-        (pp['normalization'] == 'none') & (pp['threshold'] == 15)
-    )],
-    col='normalization',
-    x='reduced_features', y='auc',
-    dodge=True, kind='box', margin_titles=True,
-    height=3, aspect=0.5,
-)
+if epitope == 'SSINFEKL':
+    g = sns.catplot(
+        data=pp[(
+            (pp['normalization'] == 'AS') & (pp['threshold'] == 46.9)
+        ) | (
+            (pp['normalization'] == 'OT1') & (pp['threshold'] == 66.8)
+        ) | (
+            (pp['normalization'] == 'none') & (pp['threshold'] == 15)
+        )],
+        col='normalization',
+        x='reduced_features', y='auc',
+        dodge=True, kind='box', margin_titles=True,
+        height=3, aspect=0.5,
+    )
+else:
+    g = sns.catplot(
+        data=pp[(
+                        (pp['normalization'] == 'pc') & (pp['threshold'] == 66.09)
+                ) | (
+                        (pp['normalization'] == 'pc') & (pp['threshold'] == 75.45)
+                )],
+        col='normalization',
+        x='reduced_features', y='auc',
+        dodge=True, kind='box', margin_titles=True,
+        height=3, aspect=1,
+    )
 
         
 def do_test(feats, auc, **kwargs):
@@ -150,7 +170,6 @@ def do_test(feats, auc, **kwargs):
              transform=plt.gca().transAxes, va='bottom', ha='left')
 
 g.map(do_test, 'reduced_features', 'auc')
-
 plt.savefig(f'figures/{epitope}_tcr_specific_feature_comparison.pdf', dpi=192)
 
 #%% metrics for each position
@@ -160,7 +179,7 @@ sns.catplot(
     data=pdf[(
         pdf['normalization'] == default_activation
     ) & (
-        pdf['threshold'] == 46.9
+        pdf['threshold'] == default_threshold
     ) & (
         pdf['reduced_features']
     )].groupby(['educated', 'tcr', 'mut_pos']).apply(lambda q: pd.Series({
@@ -226,7 +245,7 @@ height = 2
 nrows = ntcrs // ncols + 1
 
 plt.figure(figsize=(ncols * height, nrows * height))
-groups = pdf.query(f'reduced_features & normalization == "{default_activation}" & threshold == 46.9').groupby('tcr')
+groups = pdf.query(f'reduced_features & normalization == "{default_activation}" & threshold == {default_threshold}').groupby('tcr')
 for i, (tcr, g) in enumerate(groups):
     plt.subplot(nrows, ncols, i + 1)
 
@@ -261,14 +280,14 @@ plt.savefig(f'figures/{epitope}_tcr_specific_activation_AS_auroc_auprc_reduced_f
 
 #%% roc curves AS/46.9 all together
 
-aucs = pp.query(f'reduced_features == "redux" & normalization == "{default_activation}" & threshold == 46.9')
+aucs = pp.query(f'reduced_features == "redux" & normalization == "{default_activation}" & threshold == {default_threshold}')
 aucs.loc[:, 'repertoire'] = np.where(aucs['tcr'].str.startswith('ED'),
                                      'educated', 'naive')
 
 fig, (ax, ax2) = plt.subplots(1, 2, figsize=(5, 3.5),
                               gridspec_kw={'width_ratios': [3, 1.75]})
 cm = plt.get_cmap('tab20')
-groups = pdf.query(f'reduced_features & normalization == "{default_activation}" & threshold == 46.9').groupby('tcr')
+groups = pdf.query(f'reduced_features & normalization == "{default_activation}" & threshold == {default_threshold}').groupby('tcr')
 for i, (tcr, g) in enumerate(groups):
     fpr, tpr, _ = metrics.roc_curve(g['is_activated'], g['pred'])
     pre, rec, _ = metrics.precision_recall_curve(g['is_activated'], g['pred'])
@@ -306,7 +325,7 @@ ax.set_xlabel('Recall')
 pp.loc[:, 'Repertoire'] = np.where(pp['tcr'].str.startswith('ED'),
                                     'Educated', 'Naive')
 sns.boxplot(
-    data=pp.query(f'normalization == "{default_activation}" & threshold == 46.9 & reduced_features == "redux"'),
+    data=pp.query(f'normalization == "{default_activation}" & threshold == {default_threshold} & reduced_features == "redux"'),
     y='aps', x='Repertoire', ax=ax2
 )
 
@@ -357,7 +376,6 @@ g = sns.catplot(
 )
 g.map(sns.pointplot, 'threshold', 'value')
 
-
 def annot(x, y, color, data):
     t = sorted(data[y])[4]
     mask = data[y] <= t
@@ -368,6 +386,7 @@ def annot(x, y, color, data):
     adjust_text(txt, x=data[x].values, y=data[y].values,
                 arrowprops=dict(arrowstyle='-'))
 
-g.map_dataframe(annot, 'threshold', 'value')
+if epitope == 'SIINFEKL':
+    g.map_dataframe(annot, 'threshold', 'value')
 
 plt.savefig(f'figures/{epitope}_tcr_specific_thr_vs_norm_reduced_features.pdf', dpi=192)

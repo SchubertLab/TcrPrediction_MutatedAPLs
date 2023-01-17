@@ -6,6 +6,8 @@ from tqdm import tqdm
 import argparse
 import json
 import os
+import sys
+sys.path.append('..')
 
 from preprocessing import add_activation_thresholds, full_aa_features, get_aa_features
 from preprocessing import get_complete_dataset
@@ -13,23 +15,26 @@ from utils_al import train_classification_model, predict_classification_on_test,
 from utils_al import predict_regression_on_test, evaluate_classification_models, evaluate_regression_models
 
 parser = argparse.ArgumentParser()
+parser.add_argument('--epitope', type=str, default='SIINFEKL')
 parser.add_argument('--normalization', type=str, default='AS')
 parser.add_argument('--n', type=int, default=8)
 parser.add_argument('--threshold', type=str, default='46.9')
 parser.add_argument('--m', type=int, default=10)
 parser.add_argument('--start_idx', type=int, default=0)
 parser.add_argument('--n_exp', type=int, default=10)
+parser.add_argument('--metric', type=str, default='auc')
 args = parser.parse_args()
 
 
 NORMALIZATION = args.normalization
 THRESHOLD = args.threshold
+EPITOPE = args.epitope
 N = args.n
 M = args.m
 
 n_exp = args.n_exp
 start_idx = args.start_idx * n_exp
-
+metric = args.metric
 
 def add_gready_upper_bound(data_tcr, df_tcr, apls_train, clf, reg, N):
     new_apls = []
@@ -37,15 +42,23 @@ def add_gready_upper_bound(data_tcr, df_tcr, apls_train, clf, reg, N):
         max_score = 0.
         best_tcr = ''
 
-        apls_test = df_tcr[~df_tcr['epitope'].isin(apls_train)]['epitope']
+        apls_test = df_tcr[~df_tcr['epitope'].isin(apls_train + new_apls)]['epitope']
         def score_by_tcr(tcr):
             train_new = apls_train.copy()
             train_new = train_new + new_apls
             train_new.append(tcr)
 
-            clf = train_classification_model(data_tcr, df_tcr, train_new, idx)
-            p_test, c_truth = predict_classification_on_test(data_tcr, df_tcr, clf, train_new)
-            score = metrics.roc_auc_score(c_truth, p_test)
+            if metric == 'spearman':
+                reg = train_regression_model(data_tcr, df_tcr, train_new, idx)
+                y_pred, y_truth = predict_regression_on_test(data_tcr, df_tcr, reg, train_new)
+                score = correlation(method='spearman')(y_truth, y_pred)
+            else:
+                clf = train_classification_model(data_tcr, df_tcr, train_new, idx)
+                p_test, c_truth = predict_classification_on_test(data_tcr, df_tcr, clf, train_new)
+                try:
+                    score = metrics.roc_auc_score(c_truth, p_test)
+                except ValueError:
+                    score = 1
             return score
 
         scores = {tcr: score_by_tcr(tcr) for tcr in apls_test}
@@ -63,10 +76,10 @@ def run_gready_upper_bound(data_tcr, df_tcr, metrics_reg, metrics_class,
     for metric_name in list(metrics_class[0].keys()) + list(metrics_class[1].keys()) + list(metrics_reg.keys()):
         results[metric_name] = []
 
-    for idx in range(M):
+    for idx in tqdm(range(M)):
         clf = train_classification_model(data_tcr, df_tcr, apls_train, seed)
         p_test, c_truth = predict_classification_on_test(data_tcr, df_tcr, clf, apls_train)
-        evaluate_classification_models(c_truth, p_test, metrics_class, results, idx)  # todo
+        evaluate_classification_models(c_truth, p_test, metrics_class, results, idx)
 
         reg = train_regression_model(data_tcr, df_tcr, apls_train, seed)
         y_test, y_truth = predict_regression_on_test(data_tcr, df_tcr, reg, apls_train)
@@ -76,6 +89,13 @@ def run_gready_upper_bound(data_tcr, df_tcr, metrics_reg, metrics_class,
             print('Not enough data left for next step')
             break
         apls_train += add_gready_upper_bound(data_tcr, df_tcr, apls_train, None, None, N)
+    path_apls = f'{path_base}/{EPITOPE}_selectedAPLs_greedy_{metric}.csv'
+    if not os.path.exists(path_apls):
+        with open(path_apls, 'w') as f:
+            f.write('seed,tcr,apls\n')
+
+    with open(path_apls, 'a') as f:
+        f.write(f'{seed},{df_tcr["tcr"].unique()[0]},{str(apls_train)}\n')
     return results
 
 
@@ -94,21 +114,24 @@ def run_experiment(metrics_reg, metrics_class, N, M):
                 continue
 
             scores = run_gready_upper_bound(sequence_rep_tcr, data_tcr,
-                                            metrics_reg, metrics_class,
+                                            metrics_reg, metrics_class, base_epitope=EPITOPE,
                                             N=N, M=M, seed=i+start_idx)
+            tcr_info = [tcr]
+            if EPITOPE == 'SIINFEKL':
+                tcr_info += [bool(data_tcr['is_educated'].iloc[0])]
 
-            tcr_info = [tcr, bool(data_tcr['is_educated'].iloc[0])]
             for name, score in scores.items():
                 results[name] += [tcr_info + val for val in score]
     return results
 
 
-data = get_complete_dataset()
-data = add_activation_thresholds(data)
+data = get_complete_dataset(EPITOPE)
+data = add_activation_thresholds(data, epitope=EPITOPE)
 
 data = data[data['normalization'] == NORMALIZATION]
 data = data[data['threshold'] == THRESHOLD]
-data = data[data['is_educated'] == True]
+if EPITOPE == 'SIINFEKL':
+    data = data[data['is_educated'] == True]
 
 
 aa_features = get_aa_features()
@@ -116,7 +139,7 @@ features_no_mutation = aa_features.loc[['-']]
 features_no_mutation.rename(index={'-': None}, inplace=True)
 aa_features = pd.concat([aa_features, features_no_mutation])
 
-sequence_representation = full_aa_features(data, aa_features[['factors']])
+sequence_representation = full_aa_features(data, aa_features[['factors']], base_peptide=EPITOPE)
 
 def correlation(method):
     def corr_method(y_true, y_pred):
@@ -147,11 +170,11 @@ metrics_reg = {
     'Spearman': correlation(method='spearman'),
 }
 
-resis = run_experiment(metrics_reg, metrics_cls, N, M)
-print(resis)
+path_base = os.path.dirname(os.path.abspath(__file__)) + '/../results/active_learning/within'
 
-path_base = os.path.dirname(os.path.abspath(__file__))
-path_out = path_base + f'/results/greedy_baseline_{N}_start_{start_idx}_n_{n_exp}.json'
+resis = run_experiment(metrics_reg, metrics_cls, N, M)
+
+path_out = path_base + f'/greedy/{EPITOPE}/greedy_baseline_{metric}_{N}_start_{start_idx}_n_{n_exp}.json'
 
 with open(path_out, 'w') as output_file:
     json.dump(resis, output_file)

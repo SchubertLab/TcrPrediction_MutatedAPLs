@@ -11,12 +11,11 @@ import pandas as pd
 import seaborn as sns
 from scipy import stats
 from sklearn import metrics
-from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
-from sklearn.metrics import (average_precision_score, precision_recall_curve,
-                             roc_auc_score, roc_curve)
+from sklearn.ensemble import RandomForestRegressor
+from sklearn import metrics
 from tqdm import tqdm
 
-from preprocessing import (add_activation_thresholds, build_feature_groups,
+from preprocessing import (build_feature_groups,
                            decorrelate_groups, full_aa_features,
                            get_aa_factors, get_aa_features,
                            get_complete_dataset, get_dataset, get_tumor_dataset)
@@ -50,19 +49,22 @@ def shuffle(df, col_mask, keep_rows=None):
 
 
 def train():
-    df = get_dataset(normalization='AS') if epitope=='SIINFEKL' else get_tumor_dataset()
-    df = df[df['tcr'].isin(['R24', 'R28'])]
-
+    if epitope == 'VPSVWRSSL':
+        df = get_tumor_dataset()
+    else:
+        df = get_dataset(normalization='AS')
     tdf = df[(
         df['mut_pos'] >= 0
     ) & (
         ~df['cdr3a'].isna()
     ) & (
         ~df['cdr3b'].isna()
+    ) & (
+        df['tcr'].isin(df.query('activation > 15')['tcr'].unique())
     )]
-    tdf['is_activated'] = tdf['activation'] > default_threshold
 
     aa_features = get_aa_features()
+    aa_features = aa_features[['factors']]
     fit_data = full_aa_features(tdf, aa_features[['factors']], include_tcr=True, base_peptide=epitope)
 
     # remove position, original and mutated amino acid
@@ -82,12 +84,14 @@ def train():
         test_mask = tdf['tcr'] == test_tcr
 
         xtrain = fit_data.loc[~test_mask]
-        ytrain = tdf.loc[~test_mask, 'is_activated']
+        ytrain = tdf.loc[~test_mask, 'activation']
 
         # train and predict
-        reg = RandomForestClassifier(
-            n_estimators=1000,
-            n_jobs=n_jobs,
+        reg = RandomForestRegressor(
+                n_jobs=n_jobs,
+                n_estimators=250,
+                max_features='sqrt',
+                criterion='mae',
         ).fit(xtrain, ytrain)
 
         for group, cols in tqdm(feature_groups.items(), ncols=50, leave=False):
@@ -110,11 +114,11 @@ def train():
             # samples from tcrs in the training set
             for i in range(15):
                 xshuffle = shuffle(fit_data, column_mask)
-                shuffle_preds = reg.predict_proba(xshuffle[test_mask])[:, 1]
+                shuffle_preds = reg.predict(xshuffle[test_mask])
 
                 pdf = tdf[test_mask][[
                     'tcr', 'mut_pos', 'mut_ami', 'wild_activation',
-                    'activation', 'is_activated'
+                    'activation'
                 ]]
                 pdf['pred'] = shuffle_preds
                 pdf['group'] = group
@@ -122,6 +126,8 @@ def train():
                 perf.append(pdf)
 
     ppdf = pd.concat(perf)
+    ppdf['err'] = ppdf['pred'] - ppdf['activation']
+    ppdf['abserr'] = np.abs(ppdf['err'])
 
     return ppdf
 
@@ -136,8 +142,8 @@ default_activation = params.activation
 default_threshold = params.threshold
 
 #%%
-fname = f'results/{epitope}_tcr_stratified_permutation_importance.csv.gz'
-if not os.path.exists(fname):
+fname = f'results/{epitope}_tcr_stratified_permutation_importance_regression.csv.gz'
+if True or not os.path.exists(fname):
     pdf = train()
     pdf.to_csv(fname, index=False)
 else:
@@ -146,12 +152,11 @@ else:
 
 
 #%% computing performance (only for activated tcrs)
-mdf = pdf[pdf['tcr'].isin(
-    pdf[pdf['is_activated'] > 0.5]['tcr'].unique()
-)].groupby(['tcr', 'group', 'shuffle']).apply(lambda q: pd.Series({
-    'auc': roc_auc_score(q['is_activated'], q['pred']),
-    'aps': average_precision_score(q['is_activated'], q['pred']),
-    #'spearman': stats.spearmanr(q['activation'], q['pred'])[0],
+mdf = pdf.groupby(['tcr', 'group', 'shuffle']).apply(lambda g: pd.Series({
+    'mae': g['abserr'].mean(),
+    'r2': metrics.r2_score(g['activation'], g['pred']),
+    'pearson': g['activation'].corr(g['pred'], method='pearson'),
+    'spearman': g['activation'].corr(g['pred'], method='spearman'),
 })).reset_index().drop(columns='shuffle')
 
 
@@ -172,7 +177,7 @@ ddf['is_educated'] = np.where(
 
 #%%
 print(ddf.query(
-    'variable == "auc" & is_educated'
+    'variable == "spearman" & is_educated'
 ).groupby('group')['value'].median().sort_values())
 
 #%% feature importance for educated
@@ -180,7 +185,7 @@ g = sns.catplot(
     data=ddf[(
         ddf['is_educated'] == "Educated"
     ) & (
-        ddf['variable'] == 'auc'
+        ddf['variable'] == 'spearman'
     ) & (
         ddf['group'].str.startswith('pos_')
           | ddf['group'].isin(['cdr3', 'all'])
@@ -210,14 +215,14 @@ g = sns.catplot(
 g.set(ylim=(0.5, 1), ylabel='AUC on educated repertoire',
       xlabel='Group permuted')
 
-g.savefig(f'figures/{epitope}_permutation_feature_importance_educated.pdf', dpi=192)
-g.savefig(f'figures/{epitope}_permutation_feature_importance_educated.png', dpi=192)
+g.savefig(f'figures/{epitope}_permutation_feature_importance_educated_regression.pdf', dpi=192)
+g.savefig(f'figures/{epitope}_permutation_feature_importance_educated_regression.png', dpi=192)
 
 
 #%% decrease by position
 
 pddf = ddf.query(
-    'tcr!="G6" & variable=="auc" & item == "pos"'
+    'tcr!="G6" & variable=="spearman" & item == "pos"'
 ).rename(columns={
     'rel': 'Relative Increase',
     'tcr': 'TCR',
@@ -256,5 +261,5 @@ g.map(sns.stripplot,
 g.add_legend(title='TCR', ncol=2)
 g.ax.set_yticklabels([f'{100 * y:.0f}%' for y in g.ax.get_yticks()])
 
-g.savefig(f'figures/{epitope}_permutation_feature_importance_positions.pdf', dpi=192)
-g.savefig(f'figures/{epitope}_permutation_feature_importance_positions.png', dpi=192)
+g.savefig(f'figures/{epitope}_permutation_feature_importance_positions_regression.pdf', dpi=192)
+g.savefig(f'figures/{epitope}_permutation_feature_importance_positions_regression.png', dpi=192)

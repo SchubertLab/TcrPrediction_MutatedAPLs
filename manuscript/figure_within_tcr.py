@@ -197,18 +197,42 @@ print('\n\n---  spearman by amino acid averaging spearman of individual tcrs\n',
 print('\n\n---  data size hypothesis testing')
 m = 'Spearman'
 plot_data.lmdf.query(f'Metric == "{m}"').groupby(['Split', 'tcr'])['Value'].mean().reset_index()
-lmo_aps = plot_data.lmdf.query(f'Split=="LMO" & Metric == "{m}"').groupby('tcr')['Value'].mean().dropna()
-for split in plot_data.lmdf['Split'].unique():
-    if split == 'LMO':
-        continue
-    
-    split_aps = plot_data.lmdf.query(f'Split=="{split}" & Metric == "{m}"').groupby('tcr')['Value'].mean().dropna()
-    assert np.all(lmo_aps.index == split_aps.index)
-    tr = stats.wilcoxon(lmo_aps, split_aps, alternative='greater')
-    md = split_aps.mean() - lmo_aps.mean()
-    sd = np.sqrt((split_aps.var() + lmo_aps.var()) / 2)
-    
-    print(f'split {split} vs. LMO - mean difference {md:.4f} - effect size {md / sd:.4f} - W: {tr.statistic:.4f} , p: {tr.pvalue:.3e}')
+
+for r in ['Naive', 'Educated']:
+    print(f'---- {r}')
+    lmo_aps = plot_data.lmdf.query(f'Split=="LMO" & Metric == "{m}" & Repertoire =="{r}"').groupby('tcr')['Value'].mean().dropna()
+    for split in plot_data.lmdf['Split'].unique():
+        if split == 'LMO':
+            continue
+
+        split_aps = plot_data.lmdf.query(f'Split=="{split}" & Metric == "{m}" & Repertoire =="{r}"').groupby('tcr')['Value'].mean().dropna()
+        assert np.all(lmo_aps.index == split_aps.index)
+        tr = stats.wilcoxon(lmo_aps, split_aps, alternative='greater')
+        md = split_aps.mean() - lmo_aps.mean()
+        sd = np.sqrt((split_aps.var() + lmo_aps.var()) / 2)
+
+        print(f'split {split} vs. LMO - mean difference {md:.4f} - effect size {md / sd:.4f} - W: {tr.statistic:.4f} , p: {tr.pvalue:.3e}')
+
+
+print('\n\n---  data size active hypothesis testing')
+m = 'Spearman'
+plot_data.lmdf.query(f'Metric == "{m}"').groupby(['Split', 'tcr'])['Value'].mean().reset_index()
+
+for r in ['Naive', 'Educated']:
+    print(f'---- {r}')
+    lmo_aps = plot_data.lmdf.query(f'Split=="LMO" & Metric == "{m}" & Repertoire =="{r}"').groupby('tcr')['Value'].mean().dropna()
+    for split in plot_data.lmdf['Split'].unique():
+        if split == 'LMO':
+            continue
+
+        split_aps = plot_data.lmdf.query(f'Split=="{split}" & Metric == "{m}" & Repertoire =="{r}"').groupby('tcr')['Value'].mean().dropna()
+        assert np.all(lmo_aps.index == split_aps.index)
+        tr = stats.wilcoxon(lmo_aps, split_aps, alternative='greater')
+        md = split_aps.mean() - lmo_aps.mean()
+        sd = np.sqrt((split_aps.var() + lmo_aps.var()) / 2)
+
+        print(f'split {split} vs. LMO - mean difference {md:.4f} - effect size {md / sd:.4f} - W: {tr.statistic:.4f} , p: {tr.pvalue:.3e}')
+
 
 
 #%%

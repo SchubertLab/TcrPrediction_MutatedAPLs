@@ -44,7 +44,7 @@ def plot_distances(do_beta=True, do_save=False, do_return=False, mode='min', use
     plot_matrix(distances_matrix, list(chain), list(epitope), do_save=do_save, use_igtm=use_igtm, do_beta=do_beta,
                 idx=idx)
     if do_save:
-        save_matrix(distances_matrix)
+        save_matrix(distances_matrix, do_beta=do_beta, idx=idx)
 
 
 def get_sequence_names(do_beta=True, idx=0):
@@ -127,7 +127,11 @@ def plot_matrix(matrix, x_ticks, y_ticks, do_save, use_igtm=False, do_beta=True,
     plt.savefig(path_out, dpi='figure')
 
 
-def save_matrix(matrix, path_out='../results/model3d/test_alpha.csv'):
+def save_matrix(matrix, do_beta, idx=0):
+    if do_beta:
+        path_out = '../results/model3d/' + cmd.get_names()[idx] + '_beta.csv'
+    else:
+        path_out = '../results/model3d/' + cmd.get_names()[idx] + '_alpha.csv'
     df = pd.DataFrame(matrix)
     df.to_csv(path_out)
 
@@ -153,4 +157,5 @@ amino_list = []
 
 if __name__ == 'pymol':
     plot_distances(do_beta=False, do_save=True, mode='com', use_igtm=True, idx=0)
+    plot_distances(do_beta=True, do_save=True, mode='com', use_igtm=True, idx=0)
     print('finished')

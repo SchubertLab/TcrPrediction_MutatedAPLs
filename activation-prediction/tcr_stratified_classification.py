@@ -5,6 +5,7 @@
 import os
 import sys
 from functools import reduce
+import argparse
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -36,7 +37,7 @@ def masked_groupby(df, cols):
 
 
 def train():
-    df = add_activation_thresholds(get_complete_dataset(epitope))
+    df = add_activation_thresholds(get_complete_dataset(epitope), epitope=epitope)
 
     tdf = df[(
         df['mut_pos'] >= 0
@@ -89,7 +90,15 @@ def train():
 
     return ppdf
 
-epitope = 'VPSVWRSSL'
+parser = argparse.ArgumentParser()
+parser.add_argument('--epitope', type=str, default='SIINFEKL')
+parser.add_argument('--activation', type=str, default='AS')
+parser.add_argument('--threshold', type=float, default=46.9)
+params = parser.parse_args()
+
+epitope = params.epitope
+default_activation = params.activation
+default_threshold = params.threshold
 
 fname = f'results/{epitope}_tcr_stratified_classification_performance.csv.gz'
 if not os.path.exists(fname):
@@ -119,20 +128,34 @@ pp.loc[:, 'reduced_features'] = np.where(pp['reduced_features'], 'redux', 'full'
 
     
 #%% are reduced features better?
+# todo
+if epitope == 'SIINFEKL':
+    g = sns.catplot(
+        data=pp[(
+            (pp['normalization'] == default_activation) & (pp['threshold'] == 46.9)
+        ) | (
+            (pp['normalization'] == 'OT1') & (pp['threshold'] == 66.8)
+        ) | (
+            (pp['normalization'] == 'none') & (pp['threshold'] == 15)
+        )],
+        col='normalization',
+        x='reduced_features', y='auc',
+        dodge=True, kind='box', margin_titles=True,
+        height=3, aspect=0.5,
+    )
+else:
+    g = sns.catplot(
+        data=pp[(
+            (pp['normalization'] == default_activation) & (pp['threshold'] == 66.09)
+        ) | (
+            (pp['normalization'] == 'OT1') & (pp['threshold'] == 75.45)
+        )],
+        col='normalization',
+        x='reduced_features', y='auc',
+        dodge=True, kind='box', margin_titles=True,
+        height=3, aspect=1,
+    )
 
-g = sns.catplot(
-    data=pp[(
-        (pp['normalization'] == 'AS') & (pp['threshold'] == 46.9)
-    ) | (
-        (pp['normalization'] == 'OT1') & (pp['threshold'] == 66.8)
-    ) | (
-        (pp['normalization'] == 'none') & (pp['threshold'] == 15)
-    )],
-    col='normalization',
-    x='reduced_features', y='auc',
-    dodge=True, kind='box', margin_titles=True,
-    height=3, aspect=0.5,
-)
 
         
 def do_test(feats, auc, **kwargs):
@@ -159,6 +182,7 @@ def do_test(feats, auc, **kwargs):
 g.map(do_test, 'reduced_features', 'auc')
 
 plt.savefig(f'figures/{epitope}_tcr_stratified_feature_comparison.pdf', dpi=192)
+plt.savefig(f'figures/{epitope}_tcr_stratified_feature_comparison.png', dpi=192)
 
 
 #%% all aucs together
@@ -176,7 +200,7 @@ educated_colors = sns.color_palette(
 educated_idx = 1
 
 plt.figure(figsize=(4 * 1.25, 4))
-groups = pdf.query('reduced_features & normalization == "AS" & threshold == 46.9').groupby(['reduced_features', 'tcr'])
+groups = pdf.query(f'reduced_features & normalization == "{default_activation}" & threshold == {default_threshold}').groupby(['reduced_features', 'tcr'])
 for i, ((fs, tcr), g) in enumerate(groups):
     fpr, tpr, _ = metrics.roc_curve(g['is_activated'], g['pred'])
     auc = metrics.roc_auc_score(g['is_activated'], g['pred'])
@@ -205,8 +229,8 @@ plt.legend([
 
 plt.tight_layout()
 sns.despine()
-plt.savefig(f'figures/{epitope}_tcr_stratified_activation_AS_auroc_together.pdf', dpi=192)
-plt.savefig(f'figures/{epitope}_tcr_stratified_activation_AS_auroc_together.png', dpi=192)
+plt.savefig(f'figures/{epitope}_tcr_stratified_activation_{default_activation}_auroc_together.pdf', dpi=192)
+plt.savefig(f'figures/{epitope}_tcr_stratified_activation_{default_activation}_auroc_together.png', dpi=192)
 
 # %% roc auc curves for all thresholds / normalization combinations
 
@@ -253,6 +277,7 @@ plt.gcf().legend(*zip(*[
 plt.tight_layout()
 sns.despine()
 plt.savefig(f'figures/{epitope}_tcr_stratified_activation_aucs.pdf', dpi=192)
+plt.savefig(f'figures/{epitope}_tcr_stratified_activation_aucs.png', dpi=192)
 
 # %% roc curves for AS / 46.9
 
@@ -262,7 +287,7 @@ height = 2
 nrows = ntcrs // ncols + 1
 
 plt.figure(figsize=(ncols * height, nrows * height))
-groups = pdf.query('reduced_features & normalization == "AS" & threshold == 46.9').groupby('tcr')
+groups = pdf.query(f'reduced_features & normalization == "{default_activation}" & threshold == {default_threshold}').groupby('tcr')
 for i, (tcr, g) in enumerate(groups):
     plt.subplot(nrows, ncols, i + 1)
 
@@ -293,8 +318,8 @@ for i, (tcr, g) in enumerate(groups):
 
 plt.tight_layout()
 sns.despine()
-plt.savefig(f'figures/{epitope}_tcr_stratified_activation_AS_auroc_auprc.pdf', dpi=192)
-
+plt.savefig(f'figures/{epitope}_tcr_stratified_activation_{default_activation}_auroc_auprc.pdf', dpi=192)
+plt.savefig(f'figures/{epitope}_tcr_stratified_activation_{default_activation}_auroc_auprc.png', dpi=192)
 
 #%% comparing thresholds and normalizations
 
@@ -326,15 +351,19 @@ adf = pdf.query('reduced_features').groupby([
     'normalization', 'threshold', 'tcr'
 ])
 
+order = [15.0, 46.9, 66.8]
+if epitope != 'SIINFEKL':
+    order = [66.09, 75.45]
+
 g = sns.catplot(
     data=adf,
     x='threshold', y='value',
     col='normalization',
     row='variable', height=2,
     margin_titles=True,
-    order=[15.0, 46.9, 66.8]
+    order=order
 )
-g.map(sns.pointplot, 'threshold', 'value', order=[15.0, 46.9, 66.8])
+g.map(sns.pointplot, 'threshold', 'value', order=order)
 
 
 def annot(x, y, color, data):
@@ -346,9 +375,10 @@ def annot(x, y, color, data):
     ]
     adjust_text(txt, arrowprops=dict(arrowstyle='-'))
 
-
-g.map_dataframe(annot, 'threshold', 'value')
+if epitope ==  'SIINFEKL':
+    g.map_dataframe(annot, 'threshold', 'value')
 
 plt.savefig(f'figures/{epitope}_tcr_stratified_thr_vs_norm.pdf', dpi=192)
+plt.savefig(f'figures/{epitope}_tcr_stratified_thr_vs_norm.png', dpi=192)
 
 

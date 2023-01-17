@@ -93,7 +93,7 @@ def get_cdr_sequences(alignment_type='muscle'):
 
 def get_cdr_sequences_tumor(alignment_type='muscle'):
     path_base = os.path.dirname(__file__)
-    df_tumor = pd.read_excel(os.path.join(path_base, '../data/Data_summary_RNF43.xlsx'), 'Sequences')
+    df_tumor = pd.read_excel(os.path.join(path_base, '../data/Data_summary_RNF43_AS.xlsx'), 'Sequences')
     df_tumor = df_tumor.rename(columns={'Unnamed: 0': 'tcr',
                                         'CDR3beta': 'cdr3b',
                                         'CDR3alpha': 'cdr3a'})
@@ -201,9 +201,9 @@ def get_dataset(educated_repertoire=None, normalization=None,
 
 def get_tumor_dataset(cdr3_alignment_type='muscle', base_peptide='VPSVWRSSL'):
     path_base = os.path.dirname(__file__)
-    fname = os.path.join(path_base, '../data/Data_summary_RNF43.xlsx')
+    fname = os.path.join(path_base, '../data/Data_summary_RNF43_AS.xlsx')
 
-    df = pd.read_excel(fname, 'Mean')
+    df = pd.read_excel(fname, 'Normalized by PC')
 
     # unpack the columns into each tcr
     dds = []
@@ -213,6 +213,9 @@ def get_tumor_dataset(cdr3_alignment_type='muscle', base_peptide='VPSVWRSSL'):
         d['tcr'] = df.columns[i].upper()
         dds.append(d)
     df = pd.concat(dds)
+
+    # exclude R27 since positive control did not work
+    df = df[df['tcr'] != 'R27']
 
     # convert apl to mutation position and amino acid
     def get_mutation(apl, do_position=True):
@@ -246,11 +249,11 @@ def get_tumor_dataset(cdr3_alignment_type='muscle', base_peptide='VPSVWRSSL'):
     )
     df['residual'] = df['activation'] - df['wild_activation']
 
-    df['normalization'] = 'none'
+    df['normalization'] = 'pc'
     return df.reset_index(drop=True)
 
 
-def get_complete_dataset(epitope):
+def get_complete_dataset(epitope='SIINFEKL'):
     if epitope == 'VPSVWRSSL':
         return get_tumor_dataset()
 
@@ -265,10 +268,13 @@ def get_complete_dataset(epitope):
     return pd.concat(dfs).reset_index(drop=True)
 
 
-def add_activation_thresholds(df, key='is_activated', remove_constant=True):
+def add_activation_thresholds(df, key='is_activated', remove_constant=True, epitope='SIINFEKL'):
     ds = []
+    thresholds = [15, 46.9, 66.8]
+    if epitope == 'VPSVWRSSL':
+        thresholds = [66.09, 75.45]
     for _, g in df.groupby('normalization'):
-        for thr in [15, 46.9, 66.8]:
+        for thr in thresholds:
             g['threshold'] = str(thr)
             g[key] = g['activation'] > thr
             ds.append(g.copy())
@@ -585,11 +591,11 @@ def full_aa_features(fit_data, aa_features, interactions=False,
 
 # %% grouping
 
-def build_feature_groups(columns):
+def build_feature_groups(columns, length=8):
     groups = set([c.split('$')[0] for c in columns])
     feature_groups = {'all': []}
 
-    for i in range(8):
+    for i in range(length):
         feature_groups[f'pos_{i}'] = [f'wild_{i}', f'epi_{i}', f'diff_{i}']
         groups.difference_update(feature_groups[f'pos_{i}'])
 
@@ -599,7 +605,6 @@ def build_feature_groups(columns):
     feature_groups['cdr3'] = [c for c in columns if c.startswith('cdr3')]
     feature_groups['cdr3a'] = [c for c in columns if c.startswith('cdr3a')]
     feature_groups['cdr3b'] = [c for c in columns if c.startswith('cdr3b')]
-
     return feature_groups
 
 

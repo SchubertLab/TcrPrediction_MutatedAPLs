@@ -4,6 +4,7 @@
 
 import os
 import sys
+import argparse
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -41,6 +42,10 @@ def tcr_specific_model(
             for i, (train_idx, test_idx) in enumerate(split):
                 xtrain = fit_data.iloc[train_idx]
                 xtest = fit_data.iloc[test_idx]
+
+                if xtest.shape[0] == 0:
+                    print('Skipping Step due to missing samples')
+                    continue
 
                 # regression
                 yres = data.loc[fit_mask, 'residual'].iloc[train_idx]
@@ -112,7 +117,16 @@ def split_leave_r_out(test_size, n_splits):
     return split
 
 
-epitope = 'VPSVWRSSL'
+parser = argparse.ArgumentParser()
+parser.add_argument('--epitope', type=str, default='SIINFEKL')
+parser.add_argument('--activation', type=str, default='AS')
+parser.add_argument('--threshold', type=float, default=46.9)
+params = parser.parse_args()
+
+epitope = params.epitope
+default_activation = params.activation
+default_threshold = params.threshold
+
 fname = f'results/{epitope}_tcr_specific_data_size.csv.gz'
 if not os.path.exists(fname):
     print('computing results for the first time')
@@ -121,7 +135,7 @@ if not os.path.exists(fname):
     else:
         data = get_dataset(normalization='AS')
     data = data.query('mut_pos >= 0')
-    data['is_activated'] = data['activation'] > 46.9
+    data['is_activated'] = data['activation'] > default_threshold
     data = data[(
         data['mut_pos'] >= 0
     ) & data['tcr'].isin(
@@ -134,9 +148,6 @@ if not os.path.exists(fname):
     
     aa_features = get_aa_features()
     train_data = full_aa_features(data, aa_features[['factors', 'one_hot']], base_peptide=epitope)
-
-    tcr_specific_model(data, train_data, split_leave_amino_out,
-                       experiment_name='lao')
 
     ppdf = pd.concat([
         tcr_specific_model(
@@ -202,8 +213,12 @@ lmdf = mdf.melt(
     columns={'features': 'Split', 'value': 'Value'}
 )
 
-lmdf['Repertoire'] = np.where(lmdf['tcr'].str.startswith('ED'), 'Educated', 'Naive')
-ppdf['Repertoire'] = np.where(ppdf['tcr'].str.startswith('ED'), 'Educated', 'Naive')
+if epitope == 'SIINFEKL':
+    lmdf['Repertoire'] = np.where(lmdf['tcr'].str.startswith('ED'), 'Educated', 'Naive')
+    ppdf['Repertoire'] = np.where(ppdf['tcr'].str.startswith('ED'), 'Educated', 'Naive')
+else:
+    lmdf['Repertoire'] = 'tumor'
+    ppdf['Repertoire'] = 'tumor'
 
 # %% plot spearman for all TCRs by split
 g = sns.catplot(
@@ -226,11 +241,11 @@ g.savefig(f'figures/{epitope}_validation-spearman-by-split-together.png', dpi=30
 # %% compare lmo metrics across tcrs
 
 order = lmdf.query(
-    'Split=="LMO" & Metric=="Spearman" & normalization == "AS"'
+    f'Split=="LMO" & Metric=="Spearman" & normalization == "{default_activation}"'
 ).sort_values('Value')['tcr']
 
 g = sns.catplot(
-    data=lmdf.query('Split=="LMO" & normalization == "AS"'),
+    data=lmdf.query(f'Split=="LMO" & normalization == "{default_activation}"'),
     x='Value', y='tcr', col='Metric',
     order=order, row='normalization',
     sharex=False, height=4, aspect=0.7,
@@ -243,14 +258,15 @@ for k, ax in g.axes_dict.items():
     pass
 
 g.savefig(f'figures/{epitope}_validation-metrics-by-tcr.pdf', dpi=192)
+g.savefig(f'figures/{epitope}_validation-metrics-by-tcr.png', dpi=192)
 
 # %% find which amino acids are harder to predict
-
-cc = ppdf.query('features=="lao" & normalization == "AS"') \
-    .groupby(['tcr', 'Is Educated', 'normalization', 'mut_ami']) \
+print(ppdf)
+cc = ppdf.query(f'features=="lao" & normalization == "{default_activation}"') \
+    .groupby(['tcr', 'Repertoire', 'normalization', 'mut_ami']) \
     .apply(compute_metrics) \
     .reset_index() \
-    .melt(['tcr', 'Is Educated', 'normalization', 'mut_ami'])
+    .melt(['tcr', 'Repertoire', 'normalization', 'mut_ami'])
 
 order = cc.query('variable=="Spearman"') \
     .groupby('mut_ami') \
@@ -265,18 +281,18 @@ g = sns.catplot(
     col='variable',
     row='normalization',
     kind='box',
-    hue='Is Educated',
+    hue='Repertoire',
     dodge=True,
     margin_titles=True,
     sharey=False,
     order=order,
     height=3.5
 )
-g.axes_dict['AS', 'R2'].set(ylim=(-0.25, 1))
-g.axes_dict['AS', 'Pearson'].set(ylim=(-0.25, 1))
-g.axes_dict['AS', 'Spearman'].set(ylim=(-0.25, 1))
+g.axes_dict[f'{default_activation}', 'R2'].set(ylim=(-0.25, 1))
+g.axes_dict[f'{default_activation}', 'Pearson'].set(ylim=(-0.25, 1))
+g.axes_dict[f'{default_activation}', 'Spearman'].set(ylim=(-0.25, 1))
 plt.savefig(f'figures/{epitope}_metrics-by-left-out-amino.pdf', dpi=192)
-
+plt.savefig(f'figures/{epitope}_metrics-by-left-out-amino.png', dpi=192)
 # %%
 
 dd = cc.merge(
@@ -292,20 +308,21 @@ g = sns.FacetGrid(
     data=dd,
     col='variable',
     sharey=False,
-    hue='Is Educated',
+    hue='Repertoire',
     height=3.5,
     row='normalization',
 )
 g.map(sns.scatterplot, 'activation_std', 'value')#, 'mut_ami')
-g.axes_dict['AS', 'R2'].set(ylim=(-0.25, 1))
-g.axes_dict['AS', 'Pearson'].set(ylim=(-0.25, 1))
-g.axes_dict['AS', 'Spearman'].set(ylim=(-0.25, 1))
+g.axes_dict[default_activation, 'R2'].set(ylim=(-0.25, 1))
+g.axes_dict[default_activation, 'Pearson'].set(ylim=(-0.25, 1))
+g.axes_dict[default_activation, 'Spearman'].set(ylim=(-0.25, 1))
 g.add_legend()
 plt.savefig(f'figures/{epitope}_left-out-amino-metric-vs-activation-std.pdf', dpi=192)
+plt.savefig(f'figures/{epitope}_left-out-amino-metric-vs-activation-std.png', dpi=192)
 
 # %%
 print(
-    ppdf.query('features == "lao" & normalization == "AS"') \
+    ppdf.query(f'features == "lao" & normalization == "{default_activation}"') \
         .groupby(['tcr', 'mut_ami']) \
         .agg({'act': 'var'}) \
         .rename(columns={'act': 'activation_variance'}) \
@@ -314,12 +331,11 @@ print(
 
 # %% find which positions are harder to predict
 
-cc = ppdf.query('features=="lpo" & normalization == "AS"') \
-    .groupby(['tcr', 'Is Educated', 'normalization', 'mut_pos']) \
+cc = ppdf.query(f'features=="lpo" & normalization == "{default_activation}"') \
+    .groupby(['tcr', 'Repertoire', 'normalization', 'mut_pos']) \
     .apply(compute_metrics) \
     .reset_index() \
-    .melt(['tcr', 'Is Educated', 'normalization', 'mut_pos'])
-
+    .melt(['tcr', 'Repertoire', 'normalization', 'mut_pos'])
 
 order = cc.query('variable=="Spearman"') \
     .groupby('mut_pos') \
@@ -328,14 +344,14 @@ order = cc.query('variable=="Spearman"') \
     .index.to_list()
 
 g = sns.catplot(
-    data=cc[cc['Is Educated'] == 'Yes'].query('variable=="AUC"'),
+    data=cc[(cc['Repertoire'] == 'Yes') | (cc['Repertoire'] == 'tumor')].query('variable=="AUC"'),
     x='mut_pos',
     y='value',
     kind='box',
     dodge=True,
     #col='variable',
     #row='normalization',
-    #hue='Is Educated',
+    #hue='Repertoire',
     sharey=False,
     #margin_titles=True,
     order=range(len(epitope)),
@@ -356,6 +372,8 @@ g.set(xticklabels=[f'P{i+1}' for i in range(len(epitope))],
 plt.tight_layout()
 plt.savefig(f'figures/{epitope}_metrics-by-left-out-position.pdf', dpi=300,
             bbox_inches='tight')
+plt.savefig(f'figures/{epitope}_metrics-by-left-out-position.png', dpi=300,
+            bbox_inches='tight')
 
 # %% regression lines for all lmo features and all tcrs
 order = ppdf.groupby('tcr') \
@@ -363,7 +381,7 @@ order = ppdf.groupby('tcr') \
             .sort_values('act').index
 
 g = sns.lmplot(
-    data=ppdf.query('features=="lmo" & normalization == "AS"'),
+    data=ppdf.query(f'features=="lmo" & normalization == "{default_activation}"'),
     x='act',
     y='pred',
     hue='mut_pos',
@@ -379,3 +397,4 @@ g = sns.lmplot(
 )
 #g.set(xlim=(0, 80), ylim=(0, 80))
 plt.savefig(f'figures/{epitope}_tcr_specific_regression_lmo_features.pdf', dpi=192)
+plt.savefig(f'figures/{epitope}_tcr_specific_regression_lmo_features.png', dpi=192)

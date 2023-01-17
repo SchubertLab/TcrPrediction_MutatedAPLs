@@ -5,6 +5,7 @@
 
 import os
 import sys
+import argparse
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -34,6 +35,7 @@ def train():
     )]
 
     aa_features = get_aa_features()
+    aa_features = aa_features[['factors']]
 
     # disable parallel processing if running from within spyder
     n_jobs = 1 if 'SPY_PYTHONPATH' in os.environ else -1
@@ -74,8 +76,13 @@ def train():
 
     return ppdf
 
-epitope = 'VPSVWRSSL'
-default_activation = 'none'
+parser = argparse.ArgumentParser()
+parser.add_argument('--epitope', type=str, default='SIINFEKL')
+parser.add_argument('--activation', type=str, default='AS')
+params = parser.parse_args()
+
+epitope = params.epitope
+default_activation = params.activation
 
 fname = f'results/{epitope}_tcr_stratified_regression_performance.csv.gz'
 if not os.path.exists(fname):
@@ -128,16 +135,29 @@ g = sns.lmplot(
 
 #g.set(xlim=(-1, 90), ylim=(-1, 90))
 
-plt.savefig(f'figures/{epitope}_tcr_stratified_activation_regression_AS.pdf', dpi=192)
-
+plt.savefig(f'figures/{epitope}_tcr_stratified_activation_regression_{default_activation}.pdf', dpi=192)
+plt.savefig(f'figures/{epitope}_tcr_stratified_activation_regression_{default_activation}.png', dpi=192)
 #%%
 
 q = tcr_perf.reset_index()[[
     'normalization', 'tcr', 'spearman'
 ]].pivot('tcr', 'normalization')
 q.columns = q.columns.get_level_values(1)
-
 sns.pairplot(q)
 
 plt.savefig(f'figures/{epitope}_tcr_stratified_spearman_by_norm.pdf', dpi=192)
+plt.savefig(f'figures/{epitope}_tcr_stratified_spearman_by_norm.png', dpi=192)
 
+
+df_long_metrics = tcr_perf.reset_index()
+df_long_metrics = df_long_metrics.melt(['normalization', 'tcr'])
+df_long_metrics = df_long_metrics[df_long_metrics['normalization']==default_activation]
+df_long_metrics = df_long_metrics.rename(columns={'variable': 'metric', 'value': 'score'})
+
+print(df_long_metrics)
+g = sns.FacetGrid(data=df_long_metrics, col='metric', sharex=False, row='normalization')
+print(g)
+g.map(sns.barplot, 'score', 'tcr')
+
+plt.savefig(f'figures/{epitope}_tcr_stratified_regression_metrics.pdf', dpi=192)
+plt.savefig(f'figures/{epitope}_tcr_stratified_regression_metrics.png', dpi=192)

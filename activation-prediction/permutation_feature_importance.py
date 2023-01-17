@@ -3,6 +3,7 @@
 # this script estimates the permutation feature importance for tcr-stratified classification
 
 import os
+import argparse
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -18,7 +19,7 @@ from tqdm import tqdm
 from preprocessing import (add_activation_thresholds, build_feature_groups,
                            decorrelate_groups, full_aa_features,
                            get_aa_factors, get_aa_features,
-                           get_complete_dataset, get_dataset)
+                           get_complete_dataset, get_dataset, get_tumor_dataset)
 
 
 #%% training and evaluation
@@ -49,7 +50,8 @@ def shuffle(df, col_mask, keep_rows=None):
 
 
 def train():
-    df = get_dataset(normalization='AS')
+    df = get_dataset(normalization='AS') if epitope=='SIINFEKL' else get_tumor_dataset()
+    df = df[df['tcr'].isin(['R24', 'R28'])]
 
     tdf = df[(
         df['mut_pos'] >= 0
@@ -58,10 +60,10 @@ def train():
     ) & (
         ~df['cdr3b'].isna()
     )]
-    tdf['is_activated'] = tdf['activation'] > 46.9
+    tdf['is_activated'] = tdf['activation'] > default_threshold
 
     aa_features = get_aa_features()
-    fit_data = full_aa_features(tdf, aa_features, include_tcr=True)
+    fit_data = full_aa_features(tdf, aa_features[['factors']], include_tcr=True, base_peptide=epitope)
 
     # remove position, original and mutated amino acid
     # so that the model only relies on sequence information
@@ -70,7 +72,7 @@ def train():
         if 'orig_ami' not in c and 'mut_ami' not in c and 'mut_pos' not in c
     ]]
 
-    feature_groups = build_feature_groups(fit_data.columns)
+    feature_groups = build_feature_groups(fit_data.columns, length=len(epitope))
 
     # disable parallel processing if running from within spyder
     n_jobs = 1 if 'SPY_PYTHONPATH' in os.environ else -1
@@ -97,7 +99,7 @@ def train():
                 continue
 
             if group.startswith('cdr3a_') or group.startswith('cdr3b_'):
-                # do not shuffle individual cdr3a/b positioons
+                # do not shuffle individual cdr3a/b positions
                 # given the high collinearity between them I don't think
                 # we can get reliable information about the importance of
                 # a single position there
@@ -123,9 +125,18 @@ def train():
 
     return ppdf
 
+parser = argparse.ArgumentParser()
+parser.add_argument('--epitope', type=str, default='SIINFEKL')
+parser.add_argument('--activation', type=str, default='AS')
+parser.add_argument('--threshold', type=float, default=46.9)
+params = parser.parse_args()
+
+epitope = params.epitope
+default_activation = params.activation
+default_threshold = params.threshold
 
 #%%
-fname = 'results/tcr_stratified_permutation_importance.csv.gz'
+fname = f'results/{epitope}_tcr_stratified_permutation_importance.csv.gz'
 if not os.path.exists(fname):
     pdf = train()
     pdf.to_csv(fname, index=False)
@@ -155,7 +166,7 @@ ddf['diff'] = ddf['value'] - ddf['base']
 ddf['rel'] = ddf['value'] / ddf['base'] - 1  # positive = increase
 ddf['item'] = ddf['group'].str.split('_').str[0]
 ddf['is_educated'] = np.where(
-    ddf['tcr'].str.startswith('ED'),
+    ddf['tcr'].str.startswith('ED') | ddf['tcr'].str.startswith('R') ,
     'Educated', 'Naive'
 )
 
@@ -177,7 +188,7 @@ g = sns.catplot(
         'value': 'AUC', 'group': 'Permutation'
     }).replace({
         'pos_0': 'P1', 'pos_1': 'P2', 'pos_2': 'P3', 'pos_3': 'P4',
-        'pos_4': 'P5', 'pos_5': 'P6', 'pos_6': 'P7', 'pos_7': 'P8',
+        'pos_4': 'P5', 'pos_5': 'P6', 'pos_6': 'P7', 'pos_7': 'P8', 'pos_8': 'P9',
         'cdr3': 'CDR3', 'all': '-'
     }),
     x='Permutation',
@@ -199,8 +210,8 @@ g = sns.catplot(
 g.set(ylim=(0.5, 1), ylabel='AUC on educated repertoire',
       xlabel='Group permuted')
 
-g.savefig('figures/permutation_feature_importance_educated.pdf', dpi=192)
-g.savefig('figures/permutation_feature_importance_educated.png', dpi=192)
+g.savefig(f'figures/{epitope}_permutation_feature_importance_educated.pdf', dpi=192)
+g.savefig(f'figures/{epitope}_permutation_feature_importance_educated.png', dpi=192)
 
 
 #%% decrease by position
@@ -245,5 +256,5 @@ g.map(sns.stripplot,
 g.add_legend(title='TCR', ncol=2)
 g.ax.set_yticklabels([f'{100 * y:.0f}%' for y in g.ax.get_yticks()])
 
-g.savefig('figures/permutation_feature_importance_positions.pdf', dpi=192)
-g.savefig('figures/permutation_feature_importance_positions.png', dpi=192)
+g.savefig(f'figures/{epitope}_permutation_feature_importance_positions.pdf', dpi=192)
+g.savefig(f'figures/{epitope}_permutation_feature_importance_positions.png', dpi=192)

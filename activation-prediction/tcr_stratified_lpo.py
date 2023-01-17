@@ -6,6 +6,7 @@
 # the train set contains all alps of other positions for other tcrs
 
 import os
+import argparse
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -24,8 +25,20 @@ from preprocessing import (add_activation_thresholds, build_feature_groups,
                            get_complete_dataset, get_dataset, get_tumor_dataset)
 
 #%%
+parser = argparse.ArgumentParser()
+parser.add_argument('--epitope', type=str, default='SIINFEKL')
+parser.add_argument('--activation', type=str, default='AS')
+parser.add_argument('--threshold', type=float, default=46.9)
+params = parser.parse_args()
 
-df = get_dataset(normalization='AS')
+epitope = params.epitope
+default_activation = params.activation
+default_threshold = params.threshold
+
+if epitope == 'SIINFEKL':
+    df = get_dataset(normalization='AS')
+else:
+    df = get_tumor_dataset()
 
 tdf = df[(
     df['mut_pos'] >= 0
@@ -34,7 +47,7 @@ tdf = df[(
 ) & (
     ~df['cdr3b'].isna()
 )]
-tdf['is_activated'] = tdf['activation'] > 46.9
+tdf['is_activated'] = tdf['activation'] > default_threshold
 
 aa_features = get_aa_features()[['factors']]
 #fit_data = full_aa_features(tdf, aa_features, include_tcr=True)
@@ -55,7 +68,7 @@ def train():
     ) & (
         ~df['cdr3b'].isna()
     )]
-    tdf['is_activated'] = tdf['activation'] > 46.9
+    tdf['is_activated'] = tdf['activation'] > default_threshold
 
     aa_features = get_aa_features()[['factors']]
     fit_data = full_aa_features(tdf, aa_features, include_tcr=True, base_peptide=epitope)
@@ -95,7 +108,6 @@ def train():
 
 
 #%%
-epitope = 'VPSVWRSSL'
 fname = f'results/{epitope}_tcr_stratified_leave_position_out_performance.csv.gz'
 if not os.path.exists(fname):
     pdf = train()
@@ -144,4 +156,6 @@ g.set(
 
 plt.tight_layout()
 plt.savefig(f'figures/{epitope}_tcr_stratified_leave_position_out_performance.pdf', dpi=300,
+            bbox_inches='tight')
+plt.savefig(f'figures/{epitope}_tcr_stratified_leave_position_out_performance.png', dpi=300,
             bbox_inches='tight')

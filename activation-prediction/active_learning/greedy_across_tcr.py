@@ -1,8 +1,5 @@
-import matplotlib as mpl
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import seaborn as sns
 
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn import metrics
@@ -23,6 +20,16 @@ from preprocessing import get_complete_dataset
 
 from utils_al import get_aa_blosum, get_metrics_cls, get_metrics_reg
 from utils_al import predict_regression_on_test, evaluate_classification_models, evaluate_regression_models
+
+
+def correlation(method):
+    def corr_method(y_true, y_pred):
+        df = pd.DataFrame()
+        df['y_true'] = y_true
+        df['y_pred'] = y_pred
+        corr = df['y_true'].corr(df['y_pred'], method=method)
+        return corr
+    return corr_method
 
 
 def train_classification_model(samples_train, seed):
@@ -73,22 +80,27 @@ def add_greedy_across(samples_train, clf, reg, N):
     def score_by_tcr(sample):
         train_new = samples_train.copy()
         train_new.append(sample)
-
-        clf = train_classification_model(samples_train, start_idx)
-        p_test, c_truth = predict_classification_on_test(clf, train_new)
-        score = metrics.roc_auc_score(c_truth, p_test)
+        if args.metric == 'spearman':
+            reg = train_regression_model(samples_train, start_idx)
+            y_pred, y_truth = predict_regression_on_test(reg, train_new)
+            score = correlation(method='spearman')(y_truth, y_pred)
+        else:
+            clf = train_classification_model(samples_train, start_idx)
+            p_test, c_truth = predict_classification_on_test(clf, train_new)
+            try:
+                score = metrics.roc_auc_score(c_truth, p_test)
+            except ValueError:
+                # if the set contains samples of one class only, the metric is ill defined.
+                # Since all samples of one class are then sorted out the problem is considered "solved" therefore auc=1
+                score = 1.
         return score
     scores = {sample: score_by_tcr(sample) for sample in tqdm(samples_test)}
-    print(scores)
 
     new_samples = []
     for idx in range(N):
         best_sample = max(scores, key=scores.get)
         new_samples.append(best_sample)
-        print(best_sample)
-        print(new_samples)
         scores.pop(best_sample, None)
-    print(new_samples)
     return new_samples
 
 
@@ -103,8 +115,11 @@ def run_learning_loop(tcr, method_data_aquisition,
     clf = train_classification_model(samples_train, seed)
     reg = train_regression_model(samples_train, seed)
 
+    samples_tcr = []
     for idx in range(M):
-        samples_train += method_data_aquisition(samples_train, clf, reg, N)
+        new_samples = method_data_aquisition(samples_train, clf, reg, N)
+        samples_train += new_samples
+        samples_tcr += [el[0] for el in new_samples]
 
         clf = train_classification_model(samples_train, seed)
         p_test, c_truth = predict_classification_on_test(clf, samples_train)
@@ -113,6 +128,14 @@ def run_learning_loop(tcr, method_data_aquisition,
         reg = train_regression_model(samples_train, seed)
         y_test, y_truth = predict_regression_on_test(reg, samples_train)
         evaluate_regression_models(y_truth, y_test, metrics_reg, results, idx)
+
+    path_apls = f'{path_base}/{BASE_EPITOPE}_selectedAPLs_greedy_{metric}.csv'
+    if not os.path.exists(path_apls):
+        with open(path_apls, 'w') as f:
+            f.write('seed,tcr,apls\n')
+
+    with open(path_apls, 'a') as f:
+        f.write(f'{seed},{tcr},{str(samples_tcr)}\n')
     return results
 
 
@@ -126,7 +149,6 @@ def run_experiment(method_data_aquisition, N, M):
             scores = run_learning_loop(tcr, method_data_aquisition, N=N, M=M, seed=start_idx)
             for name, score in scores.items():
                 results[name] += [[tcr] + val for val in score]
-            break
     return results
 
 
@@ -137,6 +159,8 @@ parser.add_argument('--threshold', type=str, default='46.9')
 parser.add_argument('--m', type=int, default=10)
 parser.add_argument('--start_idx', type=int, default=0)
 parser.add_argument('--n_exp', type=int, default=10)
+parser.add_argument('--metric', type=str, default='auc')
+parser.add_argument('--epitope', type=str, default='SIINFEKL')
 args = parser.parse_args()
 
 
@@ -147,31 +171,33 @@ M = args.m
 
 n_exp = args.n_exp
 start_idx = args.start_idx * n_exp
+metric = args.metric
 
-BASE_EPITOPE = 'SIINFEKL'
+BASE_EPITOPE = args.epitope
 
-data = get_complete_dataset()
-data = add_activation_thresholds(data)
+data = get_complete_dataset(BASE_EPITOPE)
+data = add_activation_thresholds(data, epitope=BASE_EPITOPE)
 data['full_sample'] = data[['epitope', 'tcr']].apply(tuple, axis=1)
 
 data = data[data['normalization'] == NORMALIZATION]
 data = data[data['threshold'] == THRESHOLD]
-data = data[data['is_educated'] == True]
+if BASE_EPITOPE == 'SIINFEKL':
+    data = data[data['is_educated'] == True]
 
 aa_features = get_aa_features()
 features_no_mutation = aa_features.loc[['-']]
 features_no_mutation.rename(index={'-': None}, inplace=True)
 aa_features = pd.concat([aa_features, features_no_mutation])
-features = full_aa_features(data, aa_features[['factors']])
+features = full_aa_features(data, aa_features[['factors']], base_peptide=BASE_EPITOPE)
 
 metrics_reg = get_metrics_reg()
 metrics_class = get_metrics_cls()
 
-resis = run_experiment(add_greedy_across, N, M)
-print(resis)
+path_base = os.path.dirname(os.path.abspath(__file__)) + '/../results/active_learning/across'
 
-path_base = os.path.dirname(os.path.abspath(__file__))
-path_out = path_base + f'/results/al/CROSS_greedy_baseline_{N}_start_{start_idx}_n_{n_exp}.json'
+resis = run_experiment(add_greedy_across, N, M)
+
+path_out = path_base + f'/greedy/{BASE_EPITOPE}/CROSS_greedy_baseline_{metric}_{N}_start_{start_idx}_n_{n_exp}.json'
 
 with open(path_out, 'w') as output_file:
     json.dump(resis, output_file)
