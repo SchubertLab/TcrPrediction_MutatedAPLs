@@ -35,21 +35,22 @@ def read_fasta(fname):
 def get_cdr_sequences(alignment_type='muscle'):
     path_base = os.path.dirname(__file__)
     # naive repertoire
-    ntdf = pd.read_csv(
-        os.path.join(path_base, '../data/naive repertoire SIINFEKL APL landscape data V2 TCR INFO.csv')
+    ntdf = pd.read_excel(
+        os.path.join(path_base, '../data/LR_data_naive_repertoire_and_OTI.xlsx'),
+        'TCRinfo'
     )
     ntdf['tcr'] = ntdf['sample id (TCR)'].apply(
         lambda s: s.split('_')[3] if '_' in s else s.replace('-', '')
     )
 
     ntdf = ntdf.rename(columns={
-        'CDR3α': 'cdr3a',
-        'CDR3β': 'cdr3b',
+        'CDR3a': 'cdr3a',
+        'CDR3b': 'cdr3b',
     })[['tcr', 'cdr3a', 'cdr3b']]
-
     # educated repertoire
     etdf = pd.read_excel(
-        os.path.join(path_base, '../data/Educated_repertoire_derived_TCRs_CDR3a_b_TCRa_b.xlsx')
+        os.path.join(path_base, '../data/PH_data_educated_repertoire_and_OTI.xlsx'),
+        'TCRinfo'
     )[[
         'TCR', 'CDR3b', 'CDR3a'
     ]].rename(columns={
