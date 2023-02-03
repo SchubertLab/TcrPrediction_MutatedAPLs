@@ -36,39 +36,37 @@ def get_cdr_sequences(alignment_type='muscle'):
     path_base = os.path.dirname(__file__)
     # naive repertoire
     ntdf = pd.read_excel(
-        os.path.join(path_base, '../data/LR_data_naive_repertoire_and_OTI.xlsx'),
-        'TCRinfo'
+        os.path.join(path_base, '../data/Affinity_prediction_naive_repertoire.xlsx'),
+        'TCR_info', skiprows=1
     )
-    ntdf['tcr'] = ntdf['sample id (TCR)'].apply(
-        lambda s: s.split('_')[3] if '_' in s else s.replace('-', '')
-    )
-
     ntdf = ntdf.rename(columns={
-        'CDR3a': 'cdr3a',
-        'CDR3b': 'cdr3b',
+        'CDR3α': 'cdr3a',
+        'CDR3β': 'cdr3b',
+        'TCR': 'tcr'
     })[['tcr', 'cdr3a', 'cdr3b']]
     # educated repertoire
     etdf = pd.read_excel(
-        os.path.join(path_base, '../data/PH_data_educated_repertoire_and_OTI.xlsx'),
-        'TCRinfo'
-    )[[
-        'TCR', 'CDR3b', 'CDR3a'
-    ]].rename(columns={
-        'TCR': 'tcr', 'CDR3b': 'cdr3b', 'CDR3a': 'cdr3a'
-    })
-    etdf['tcr'] = etdf['tcr'].str.upper()
+        os.path.join(path_base, '../data/Affinity_prediction_educated_repertoire.xlsx'),
+        'TCR_info', skiprows=1
+    )
+    etdf = etdf.rename(columns={
+        'CDR3α': 'cdr3a',
+        'CDR3β': 'cdr3b',
+        'TCR': 'tcr'
+    })[['tcr', 'cdr3a', 'cdr3b']]
+    etdf['tcr'] = etdf['tcr'].str.replace('TCR', 'ED')
 
     # alignment
     if alignment_type == 'muscle':
         cadf = pd.DataFrame(read_fasta(os.path.join(path_base, '../data/cdr3a-aligned.fasta')).items(),
                             columns=['tcr', 'cdr3a_aligned'])
-    
+
         cbdf = pd.DataFrame(read_fasta(os.path.join(path_base, '../data/cdr3b-aligned.fasta')).items(),
                             columns=['tcr', 'cdr3b_aligned'])
     elif alignment_type == 'imgt':
         cadf = pd.DataFrame(read_fasta(os.path.join(path_base, '../data/cdr3a-aligned-imgt.fasta')).items(),
                             columns=['tcr', 'cdr3a_aligned'])
-    
+
         cbdf = pd.DataFrame(read_fasta(os.path.join(path_base, '../data/cdr3b-aligned-imgt.fasta')).items(),
                             columns=['tcr', 'cdr3b_aligned'])
     else:
@@ -76,28 +74,117 @@ def get_cdr_sequences(alignment_type='muscle'):
 
     # merge and return
     tdf = pd.concat([ntdf, etdf]).merge(cadf, how='outer').merge(cbdf, how='outer')
-
-    # create copies for other OT1 with different names
-    # TODO check that these OT1 are actually all the same
-
-    tdf.loc[-1] = tdf.query('tcr=="OT1"').iloc[0]
-    tdf.loc[-1, 'tcr'] = 'OTI_PH'
-
-    tdf.loc[-2] = tdf.query('tcr=="OT1"').iloc[0]
-    tdf.loc[-2, 'tcr'] = 'LR_OTI_1'
-
-    tdf.loc[-3] = tdf.query('tcr=="OT1"').iloc[0]
-    tdf.loc[-3, 'tcr'] = 'LR_OTI_2'
-
     return tdf.reset_index(drop=True)
+
+
+def get_dataset(educated_repertoire=None, normalization=None,
+                cdr3_alignment_type='muscle'):
+    if educated_repertoire is None:
+        return pd.concat([
+            get_dataset(True, normalization, cdr3_alignment_type),
+            get_dataset(False, normalization, cdr3_alignment_type),
+        ]).reset_index(drop=True)
+
+    path_base = os.path.dirname(__file__)
+    if educated_repertoire:
+        fname = os.path.join(path_base, '../data/Affinity_prediction_educated_repertoire.xlsx')
+    else:
+        fname = os.path.join(path_base, '../data/Affinity_prediction_naive_repertoire.xlsx')
+
+    if normalization is None:
+        sheet = 'Individual APL screening'
+    elif normalization == 'AS':
+        sheet = 'Normalized data'
+    else:
+        raise ValueError('unknown normalization')
+
+    df = pd.read_excel(fname, sheet, skiprows=1)
+    df = df.drop(columns=['APL', 'Sequence', 'Position', 'Amino Acid'], errors='ignore')
+    df = df[[col for col in df.columns if not col.startswith('Unnamed:')]]
+
+    apl_info = pd.read_excel(fname, 'Individual APL screening', skiprows=1)
+    df[['epitope', 'mut_pos', 'mut_ami']] = apl_info[['Sequence', 'Position', 'Amino Acid']]
+    df['epitope'] = df['epitope'].str.split('-').str[1]
+    df['mut_pos'] = df['mut_pos'] - 1
+    df['orig_ami'] = df['mut_pos'].apply(lambda x: 'SIINFEKL'[x])
+    df.at[152, 'mut_pos'] = -1
+    df.at[152, 'mut_ami'] = 'None'
+
+    df = df.melt(id_vars=['epitope', 'mut_pos', 'mut_ami', 'orig_ami'], var_name='tcr', value_name='activation')
+    df['tcr'] = df['tcr'].str.upper()
+
+    # add cdr sequences
+    df = df.merge(get_cdr_sequences(cdr3_alignment_type), on='tcr', how='left')
+
+    # compute residual
+    df = df.merge(
+        # wild-type activation for each tcr
+        df.query('mut_pos < 0')[[
+            'tcr', 'activation'
+        ]].rename(columns={
+            'activation': 'wild_activation'
+        }),
+        on='tcr'
+    )
+    df['residual'] = df['activation'] - df['wild_activation']
+
+    df['normalization'] = normalization or 'none'
+
+    return df.reset_index(drop=True)
+
+
+def get_tumor_dataset(cdr3_alignment_type='muscle', base_peptide='VPSVWRSSL', normalization='pc'):
+    path_base = os.path.dirname(__file__)
+    fname = os.path.join(path_base, '../data/Affinity_prediction_rnf43_repertoire.xlsx')
+
+    if normalization is None:
+        sheet = 'Individual APL screening'
+    elif normalization == 'pc':
+        sheet = 'Normalized by PC'
+    else:
+        raise ValueError('unknown normalization')
+
+    df = pd.read_excel(fname, sheet, skiprows=0)
+    df = df[[col for col in df.columns if not col.startswith('Unnamed:')]]
+
+    df = df.rename(columns={'Mutated_position': 'mut_pos', 'Mutated AA': 'mut_ami', 'Peptide': 'epitope'})
+    df.at[0, 'mut_pos'] = 0
+    df.at[0, 'mut_ami'] = 'None'
+    df['mut_pos'] = df['mut_pos'] - 1
+    df['orig_ami'] = df['mut_pos'].apply(lambda x: base_peptide[x])
+    df = df.drop(columns=['Peptide ID'])
+
+    df = df.melt(id_vars=['epitope', 'mut_pos', 'mut_ami', 'orig_ami'], var_name='tcr', value_name='activation')
+
+    # add cdr sequences
+    df = df.merge(get_cdr_sequences_tumor(cdr3_alignment_type), on='tcr', how='left')
+
+    # compute residual
+    df = df.merge(
+        # wild-type activation for each tcr
+        df.query('mut_pos < 0')[[
+            'tcr', 'activation'
+        ]].rename(columns={
+            'activation': 'wild_activation'
+        }),
+        on='tcr'
+    )
+    df['residual'] = df['activation'] - df['wild_activation']
+    df['normalization'] = normalization or 'none'
+
+    # exclude R27 since positive control did not work
+    df = df[df['tcr'] != 'R27']
+
+    return df.reset_index(drop=True)
 
 
 def get_cdr_sequences_tumor(alignment_type='muscle'):
     path_base = os.path.dirname(__file__)
-    df_tumor = pd.read_excel(os.path.join(path_base, '../data/Data_summary_RNF43_AS.xlsx'), 'Sequences')
-    df_tumor = df_tumor.rename(columns={'Unnamed: 0': 'tcr',
-                                        'CDR3beta': 'cdr3b',
-                                        'CDR3alpha': 'cdr3a'})
+    df_tumor = pd.read_excel(os.path.join(path_base, '../data/Affinity_prediction_rnf43_repertoire.xlsx'),
+                             'Sequences', skiprows=1)
+    df_tumor = df_tumor.rename(columns={'TCR': 'tcr',
+                                        'CDR3β': 'cdr3b',
+                                        'CDR3α': 'cdr3a'})
     df_tumor = df_tumor[['tcr', 'cdr3a', 'cdr3b']]
 
     # alignment
@@ -121,139 +208,6 @@ def get_cdr_sequences_tumor(alignment_type='muscle'):
     return tdf.reset_index(drop=True)
 
 
-def get_dataset(educated_repertoire=None, normalization=None,
-                cdr3_alignment_type='muscle'):
-    if educated_repertoire is None:
-        return pd.concat([
-            get_dataset(True, normalization, cdr3_alignment_type),
-            get_dataset(False, normalization, cdr3_alignment_type),
-        ]).reset_index(drop=True)
-
-    path_base = os.path.dirname(__file__)
-    if educated_repertoire:
-        fname = os.path.join(path_base, '../data/PH_data_educated_repertoire_and_OTI.xlsx')
-    else:
-        fname = os.path.join(path_base, '../data/LR_data_naive_repertoire_and_OTI.xlsx')
-
-    if normalization is None:
-        sheet = 'Unnormalized Data'
-    elif normalization == 'AS':
-        sheet = 'Normalized to initial AS'
-    elif normalization == 'OT1':
-        sheet = 'Normalized to internal OTI'
-    else:
-        raise ValueError('unknown normalization')
-
-    df = pd.read_excel(fname, sheet)
-
-    # unpack the columns into each tcr
-    dds = []
-    for i in range(0, len(df.columns), 4):
-        d = df.iloc[:, [i, i + 3]].copy()
-        d.columns = ['apl', 'activation']
-        d['tcr'] = df.columns[i].upper()
-        dds.append(d)
-    df = pd.concat(dds)
-
-    # convert apl to mutation position and amino acid
-    apl_to_mut = {
-        i + 1: (p, a)
-        for i, (p, a) in enumerate([
-            (p, a)
-            for p in range(8)
-            for a in 'ACDEFGHIKLMNPQRSTVWY'
-            if a != 'SIINFEKL'[p]
-        ])
-    }
-
-    apl_to_epi = {
-        i: ''.join(
-            b if j != p else a
-            for j, b in enumerate('SIINFEKL')
-        )
-        for i, (p, a) in apl_to_mut.items()
-    }
-
-    df['mut_pos'] = df['apl'].apply(lambda x: apl_to_mut[x][0] if x in apl_to_mut else -1)
-    df['mut_ami'] = df['apl'].apply(lambda x: apl_to_mut[x][1] if x in apl_to_mut else None)
-    df['orig_ami'] = df['mut_pos'].apply(lambda x: 'SIINFEKL'[x])
-    df['epitope'] = df['apl'].apply(lambda x: apl_to_epi.get(x, 'SIINFEKL'))
-    df = df.drop(columns='apl')
-
-    # add cdr sequences
-    df = df.merge(get_cdr_sequences(cdr3_alignment_type), on='tcr', how='left')
-
-    # compute residual
-    df = df.merge(
-        # wild-type activation for each tcr
-        df.query('mut_pos < 0')[[
-            'tcr', 'activation'
-        ]].rename(columns={
-            'activation': 'wild_activation'
-        }),
-        on='tcr'
-    )
-    df['residual'] = df['activation'] - df['wild_activation']
-
-    df['normalization'] = normalization or 'none'
-
-    return df.reset_index(drop=True)
-
-
-def get_tumor_dataset(cdr3_alignment_type='muscle', base_peptide='VPSVWRSSL'):
-    path_base = os.path.dirname(__file__)
-    fname = os.path.join(path_base, '../data/Data_summary_RNF43_AS.xlsx')
-
-    df = pd.read_excel(fname, 'Normalized by PC')
-
-    # unpack the columns into each tcr
-    dds = []
-    for i in range(4, 11):
-        d = df.iloc[:, [3, i]].copy()
-        d.columns = ['epitope', 'activation']
-        d['tcr'] = df.columns[i].upper()
-        dds.append(d)
-    df = pd.concat(dds)
-
-    # exclude R27 since positive control did not work
-    df = df[df['tcr'] != 'R27']
-
-    # convert apl to mutation position and amino acid
-    def get_mutation(apl, do_position=True):
-        for i, let in enumerate(apl):
-            if let != base_peptide[i]:
-                if do_position:
-                    return i
-                else:
-                    return let
-        if do_position:
-            return -1
-        else:
-            return None
-
-    df['mut_pos'] = df['epitope'].apply(lambda x: get_mutation(x, True))
-    df['mut_ami'] = df['epitope'].apply(lambda x: get_mutation(x, False))
-    df['orig_ami'] = df['mut_pos'].apply(lambda x: base_peptide[x] if x >= 0 else None)
-
-    # add cdr sequences
-    df = df.merge(get_cdr_sequences_tumor(cdr3_alignment_type), on='tcr', how='left')
-
-    # compute residual
-    df = df.merge(
-        # wild-type activation for each tcr
-        df.query('mut_pos < 0')[[
-            'tcr', 'activation'
-        ]].rename(columns={
-            'activation': 'wild_activation'
-        }),
-        on='tcr'
-    )
-    df['residual'] = df['activation'] - df['wild_activation']
-
-    df['normalization'] = 'pc'
-    return df.reset_index(drop=True)
-
-
 def get_complete_dataset(epitope='SIINFEKL'):
     if epitope == 'VPSVWRSSL':
         return get_tumor_dataset()
@@ -261,7 +215,7 @@ def get_complete_dataset(epitope='SIINFEKL'):
     dfs = []
 
     for edu in [True, False]:
-        for norm in [None, 'AS', 'OT1']:
+        for norm in [None, 'AS']:
             df = get_dataset(edu, norm)
             df['is_educated'] = edu
             dfs.append(df)
@@ -347,7 +301,7 @@ def get_aa_factors():
     T 	−0.032 	0.326 	2.213 	0.908 	1.313
     V 	−1.337 	−0.279 	−0.544 	1.242 	−1.262
     W 	−0.595 	0.009 	0.672 	−2.128 	−0.184
-    Y 	0.260 	0.830 	3.097 	−0.838 	1.512'''.replace('−', '').replace(' ', '')
+    Y 	0.260 	0.830 	3.097 	−0.838 	1.512'''.replace('−', '-').replace(' ', '')
 
     aa_factors = {
         aa: [float(f) for f in factors]
