@@ -120,12 +120,10 @@ pp.loc[:, 'reduced_features'] = np.where(pp['reduced_features'], 'redux', 'full'
 
     
 #%% are reduced features better?
-if epitope == 'SSINFEKL':
+if epitope == 'SIINFEKL':
     g = sns.catplot(
         data=pp[(
             (pp['normalization'] == 'AS') & (pp['threshold'] == 46.9)
-        ) | (
-            (pp['normalization'] == 'OT1') & (pp['threshold'] == 66.8)
         ) | (
             (pp['normalization'] == 'none') & (pp['threshold'] == 15)
         )],

@@ -188,7 +188,7 @@ aa_features = get_aa_features()
 features_no_mutation = aa_features.loc[['-']]
 features_no_mutation.rename(index={'-': None}, inplace=True)
 aa_features = pd.concat([aa_features, features_no_mutation])
-features = full_aa_features(data, aa_features[['factors']], base_peptide=BASE_EPITOPE)
+features = full_aa_features(data, aa_features[['factors']], base_peptide=BASE_EPITOPE, include_tcr=True)
 
 metrics_reg = get_metrics_reg()
 metrics_class = get_metrics_cls()

@@ -180,16 +180,15 @@ def compute_metrics(g):
         'Spearman': g['act'].corr(g['pred'], method='spearman'),
         'AUC': (
             metrics.roc_auc_score(g['is_activated'], g['pred_prob'])
-            if np.isfinite(g['pred_prob']).all() and 0 < g['is_activated'].mean() < 1
+            if (not g['pred_prob'].isna().any()) and 0 < g['is_activated'].mean() < 1
             else np.nan
         ),
         'APS': (
             metrics.average_precision_score(g['is_activated'], g['pred_prob'])
-            if np.isfinite(g['pred_prob']).all()
+            if not g['pred_prob'].isna().any()
             else np.nan
         ),
     })
-
 
 # compute metric for each validation fold separately
 mdf = pd.concat([
