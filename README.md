@@ -16,12 +16,6 @@ sh ./activation-prediction/run_all.sh
 ```
 For the active learning results, run `activation-prediction/active_learning/al_tcr_specific.ipynb` for both epitopes.
 
-To recreate the 3D-distances:
-```
-git clone https://github.com/SchubertLab/TcrPrediction_MutatedAPLs.git
-cd TCRPrediction_MutatedAPLs
-conda create --name pteam_pymol --file=requirements_pymol.yml
-```
 The positional distances were calculated within the [pymol software](https://pymol.org/2/) via the script `Modelling3D/PositonalDistances.py` on the structural models provided in the Supplementary Data 6-7 of the paper.
 
 To recreate the baseline results, refer to the notebook `baseline/SOTA_Comparisson.ipynb` and the GitHub repositories of [ERGO-II](https://github.com/IdoSpringer/ERGO-II) link and [ImRex](https://github.com/pmoris/ImRex) link.
