@@ -5,15 +5,15 @@ P-TEAM is a Random Forest-based prediction model to estimate the effect of mutat
 While we observed that a total of 25% (ca. n=38) of randomly sampled mutations are sufficient for high-performance prediction, the number of samples can further be reduced to 24 mutations by employing iterative experimental design and our active learning framework
 
 ## Installation
-TBD - Under construction !!!
-
 To recreate the prediction results of the paper:
 ```
 git clone https://github.com/SchubertLab/TcrPrediction_MutatedAPLs.git
 cd TCRPrediction_MutatedAPLs
-conda create --name pteam --file=requirements.yml
+conda env create -f requirements.yml
 sh ./activation-prediction/run_all.sh
 ```
+Alternatively, you can work with the essential packages `numpy==1.20.2, pandas==1.2.5, scikit-learn=0.24.2, scipy==1.6.2, seaborn==0.11.1`.
+
 For the active learning results, run `activation-prediction/active_learning/al_tcr_specific.ipynb` for both epitopes.
 
 The positional distances were calculated within the [pymol software](https://pymol.org/2/) via the script `Modelling3D/PositonalDistances.py` on the structural models provided in the Supplementary Data 6-7 of the paper.
