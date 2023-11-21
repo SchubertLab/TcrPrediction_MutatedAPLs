@@ -1,5 +1,5 @@
 # P-TEAM - Predicting T Cell Receptor (TCR) Functionality against Mutant Epitopes
-![Graphical Abstract](https://github.com/SchubertLab/TcrPrediction_MutatedAPLs/figures/graphical_abstract.png)
+![Graphical Abstract](https://github.com/SchubertLab/TcrPrediction_MutatedAPLs/blob/master/figures/manuscript_fig1_abstract-1.jpg)
 
 P-TEAM is a Random Forest-based prediction model to estimate the effect of mutations in epitopes on the TCR activation. Depending on the provided label, the model can classify TCR activation binary, or predict a continuous binding score.
 While we observed that a total of 25% (ca. n=38) of randomly sampled mutations are sufficient for high-performance prediction, the number of samples can further be reduced to 24 mutations by employing iterative experimental design and our active learning framework
