@@ -24,9 +24,8 @@ To recreate the baseline results, refer to the notebook `baseline/SOTA_Compariss
 TBD - Under construction !!!
 
 Tutorials are provided for:
-- novel predictions for a specific TCR (`tutorials/within_tcr.ipynb`)
-- a full mutation profile of a novel TCR (`tutorials/across_tcr.ipynb`)
-- the active learning framework within a TCR (`tutorials/active_learning.ipynb`)
+- novel predictions for a specific TCR and active learning (`tutorials/01_within_tcr.ipynb`)
+- a full mutation profile of a novel TCR (`tutorials/02_across_tcr.ipynb`)
 
 ## Citation
 If P-TEAM is helpful in your research, please consider citing the following paper:
