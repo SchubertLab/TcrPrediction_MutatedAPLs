@@ -21,8 +21,6 @@ The positional distances were calculated within the [pymol software](https://pym
 To recreate the baseline results, refer to the notebook `baseline/SOTA_Comparisson.ipynb` and the GitHub repositories of [ERGO-II](https://github.com/IdoSpringer/ERGO-II) link and [ImRex](https://github.com/pmoris/ImRex) link.
 
 ## Tutorials
-TBD - Under construction !!!
-
 Tutorials are provided for:
 - novel predictions for a specific TCR and active learning (`tutorials/01_within_tcr.ipynb`)
 - a full mutation profile of a novel TCR (`tutorials/02_across_tcr.ipynb`)
