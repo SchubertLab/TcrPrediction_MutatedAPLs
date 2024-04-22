@@ -132,6 +132,16 @@ if epitope == 'SIINFEKL':
         dodge=True, kind='box', margin_titles=True,
         height=3, aspect=0.5,
     )
+elif epitope == 'NLVPMVATV':
+    g = sns.catplot(
+        data=pp[(
+                        (pp['normalization'] == 'none') & (pp['threshold'] == 40.0)
+                )],
+        col='normalization',
+        x='reduced_features', y='auc',
+        dodge=True, kind='box', margin_titles=True,
+        height=3, aspect=1,
+    )
 else:
     g = sns.catplot(
         data=pp[(

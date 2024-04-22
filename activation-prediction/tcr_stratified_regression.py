@@ -15,13 +15,15 @@ from sklearn import metrics
 from sklearn.ensemble import RandomForestRegressor
 from tqdm import tqdm
 
-from preprocessing import full_aa_features, get_aa_features, get_dataset, get_tumor_dataset
+from preprocessing import full_aa_features, get_aa_features, get_dataset, get_tumor_dataset, get_cmv_dataset
 
 # %% training and evaluation
 
 def train():
     if epitope == 'VPSVWRSSL':
         df = get_tumor_dataset()
+    elif epitope == 'NLVPMVATV':
+        df = get_cmv_dataset()
     else:
         df = get_dataset(normalization='AS')
     tdf = df[(

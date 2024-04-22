@@ -18,7 +18,7 @@ from tqdm import tqdm
 from preprocessing import (build_feature_groups,
                            decorrelate_groups, full_aa_features,
                            get_aa_factors, get_aa_features,
-                           get_complete_dataset, get_dataset, get_tumor_dataset)
+                           get_complete_dataset, get_dataset, get_tumor_dataset, get_cmv_dataset)
 
 
 #%% training and evaluation
@@ -51,6 +51,8 @@ def shuffle(df, col_mask, keep_rows=None):
 def train():
     if epitope == 'VPSVWRSSL':
         df = get_tumor_dataset()
+    elif epitope == 'NLVPMVATV':
+        df = get_cmv_dataset()
     else:
         df = get_dataset(normalization='AS')
     tdf = df[(
@@ -143,7 +145,7 @@ default_threshold = params.threshold
 
 #%%
 fname = f'results/{epitope}_tcr_stratified_permutation_importance_regression.csv.gz'
-if True or not os.path.exists(fname):
+if not os.path.exists(fname):
     pdf = train()
     pdf.to_csv(fname, index=False)
 else:
@@ -171,7 +173,7 @@ ddf['diff'] = ddf['value'] - ddf['base']
 ddf['rel'] = ddf['value'] / ddf['base'] - 1  # positive = increase
 ddf['item'] = ddf['group'].str.split('_').str[0]
 ddf['is_educated'] = np.where(
-    ddf['tcr'].str.startswith('ED') | ddf['tcr'].str.startswith('R') ,
+    ddf['tcr'].str.startswith('ED') | ddf['tcr'].str.startswith('R') | ddf['tcr'].str.startswith('TCR'),
     'Educated', 'Naive'
 )
 

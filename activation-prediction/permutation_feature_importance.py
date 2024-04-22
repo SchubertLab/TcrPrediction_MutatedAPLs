@@ -19,7 +19,7 @@ from tqdm import tqdm
 from preprocessing import (add_activation_thresholds, build_feature_groups,
                            decorrelate_groups, full_aa_features,
                            get_aa_factors, get_aa_features,
-                           get_complete_dataset, get_dataset, get_tumor_dataset)
+                           get_complete_dataset, get_dataset, get_tumor_dataset, get_cmv_dataset)
 
 
 #%% training and evaluation
@@ -50,8 +50,12 @@ def shuffle(df, col_mask, keep_rows=None):
 
 
 def train():
-    df = get_dataset(normalization='AS') if epitope=='SIINFEKL' else get_tumor_dataset()
-    df = df[df['tcr'].isin(['R24', 'R28'])]
+    if epitope == 'SIINFEKL':
+        df = get_dataset(normalization='AS')
+    elif epitope == 'NLVPMVATV':
+        df = get_cmv_dataset()
+    else:
+        df = get_tumor_dataset()
 
     tdf = df[(
         df['mut_pos'] >= 0
@@ -166,7 +170,7 @@ ddf['diff'] = ddf['value'] - ddf['base']
 ddf['rel'] = ddf['value'] / ddf['base'] - 1  # positive = increase
 ddf['item'] = ddf['group'].str.split('_').str[0]
 ddf['is_educated'] = np.where(
-    ddf['tcr'].str.startswith('ED') | ddf['tcr'].str.startswith('R') ,
+    ddf['tcr'].str.startswith('ED') | ddf['tcr'].str.startswith('R') | ddf['tcr'].str.startswith('TCR'),
     'Educated', 'Naive'
 )
 

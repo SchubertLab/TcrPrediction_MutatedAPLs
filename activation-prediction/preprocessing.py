@@ -178,6 +178,40 @@ def get_tumor_dataset(cdr3_alignment_type='muscle', base_peptide='VPSVWRSSL', no
     return df.reset_index(drop=True)
 
 
+def get_cmv_dataset(cdr3_alignment_type='muscle', base_peptide='NLVPMVATV'):
+    path_base = os.path.dirname(__file__)
+    fname = os.path.join(path_base, '../data/Affinity_prediction_cmv.xlsx')
+    df = pd.read_excel(fname, 'Mean')
+    df_index = pd.read_excel(fname, 'peptides')
+    df['mut_pos'] = df_index['Mutated Position']
+    df['mut_ami'] = df_index['Amino acid']
+    df['epitope'] = df_index['Peptide']
+    df['mut_pos'] = df['mut_pos'] - 1
+    df['orig_ami'] = df['mut_pos'].apply(lambda x: base_peptide[x])
+
+    df = df.drop(columns=['Peptide_ID'])
+
+    df = df.melt(id_vars=['epitope', 'mut_pos', 'mut_ami', 'orig_ami'], var_name='tcr', value_name='activation')
+    df['tcr'] = 'TCR' + df['tcr'].str.replace('_', '-')
+
+    # add cdr sequences
+    df = df.merge(get_cdr_sequences_cmv(), on='tcr', how='left')
+
+    # compute residual
+    df = df.merge(
+        # wild-type activation for each tcr
+        df.query('mut_pos < 0')[[
+            'tcr', 'activation'
+        ]].rename(columns={
+            'activation': 'wild_activation'
+        }),
+        on='tcr'
+    )
+    df['residual'] = df['activation'] - df['wild_activation']
+    df['normalization'] = 'none'
+    return df.reset_index(drop=True)
+
+
 def get_cdr_sequences_tumor(alignment_type='muscle'):
     path_base = os.path.dirname(__file__)
     df_tumor = pd.read_excel(os.path.join(path_base, '../data/Affinity_prediction_rnf43_repertoire.xlsx'),
@@ -208,9 +242,32 @@ def get_cdr_sequences_tumor(alignment_type='muscle'):
     return tdf.reset_index(drop=True)
 
 
+def get_cdr_sequences_cmv():
+    path_base = os.path.dirname(__file__)
+    df_cmv = pd.read_excel(os.path.join(path_base, '../data/Affinity_prediction_cmv.xlsx'),
+                             'TCR sequences')
+    df_cmv = df_cmv.rename(columns={'TCR id': 'tcr',
+                                        'cdr3_b_aa': 'cdr3b',
+                                        'cdr3_a_aa': 'cdr3a'})
+    df_cmv = df_cmv[['tcr', 'cdr3a', 'cdr3b']]
+    df_cmv['tcr'] = df_cmv['tcr'].str.replace(' ', '')
+
+    # alignment
+    cadf = pd.DataFrame(read_fasta(os.path.join(path_base, '../data/cdr3a-aligned_cmv.fasta')).items(),
+                        columns=['tcr', 'cdr3a_aligned'])
+
+    cbdf = pd.DataFrame(read_fasta(os.path.join(path_base, '../data/cdr3b-aligned_cmv.fasta')).items(),
+                        columns=['tcr', 'cdr3b_aligned'])
+    # merge and return
+    tdf = df_cmv.merge(cadf, on='tcr', how='outer').merge(cbdf, on='tcr', how='outer')
+    return tdf.reset_index(drop=True)
+
+
 def get_complete_dataset(epitope='SIINFEKL'):
     if epitope == 'VPSVWRSSL':
         return get_tumor_dataset()
+    if epitope == 'NLVPMVATV':
+        return get_cmv_dataset()
 
     dfs = []
 
@@ -219,7 +276,6 @@ def get_complete_dataset(epitope='SIINFEKL'):
             df = get_dataset(edu, norm)
             df['is_educated'] = edu
             dfs.append(df)
-
     return pd.concat(dfs).reset_index(drop=True)
 
 
@@ -228,6 +284,8 @@ def add_activation_thresholds(df, key='is_activated', remove_constant=True, epit
     thresholds = [15, 46.9, 66.8]
     if epitope == 'VPSVWRSSL':
         thresholds = [66.09, 75.45]
+    if epitope == 'NLVPMVATV':
+        thresholds = [40.0]
     for _, g in df.groupby('normalization'):
         for thr in thresholds:
             g['threshold'] = str(thr)

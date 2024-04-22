@@ -22,7 +22,7 @@ from tqdm import tqdm
 from preprocessing import (add_activation_thresholds, build_feature_groups,
                            decorrelate_groups, full_aa_features,
                            get_aa_factors, get_aa_features,
-                           get_complete_dataset, get_dataset, get_tumor_dataset)
+                           get_complete_dataset, get_dataset, get_tumor_dataset, get_cmv_dataset)
 
 #%%
 parser = argparse.ArgumentParser()
@@ -37,6 +37,8 @@ default_threshold = params.threshold
 
 if epitope == 'SIINFEKL':
     df = get_dataset(normalization='AS')
+elif epitope == 'NLVPMVATV':
+    df = get_cmv_dataset()
 else:
     df = get_tumor_dataset()
 
@@ -58,6 +60,8 @@ aa_features = get_aa_features()[['factors']]
 def train():
     if epitope == 'VPSVWRSSL':
         df = get_tumor_dataset()
+    elif epitope == 'NLVPMVATV':
+        df = get_cmv_dataset()
     else:
         df = get_dataset(normalization='AS')
 

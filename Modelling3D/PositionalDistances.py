@@ -41,8 +41,8 @@ def plot_distances(do_beta=True, do_save=False, do_return=False, mode='min', use
     if do_return:
         return distances_matrix
 
-    plot_matrix(distances_matrix, list(chain), list(epitope), do_save=do_save, use_igtm=use_igtm, do_beta=do_beta,
-                idx=idx)
+    #plot_matrix(distances_matrix, list(chain), list(epitope), do_save=do_save, use_igtm=use_igtm, do_beta=do_beta,
+    #idx=idx)
     if do_save:
         save_matrix(distances_matrix, do_beta=do_beta, idx=idx)
 

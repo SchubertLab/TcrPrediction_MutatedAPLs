@@ -15,7 +15,7 @@ from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
 from sklearn.model_selection import KFold, ShuffleSplit
 from tqdm import tqdm
 
-from preprocessing import full_aa_features, get_aa_features, get_dataset, get_tumor_dataset
+from preprocessing import full_aa_features, get_aa_features, get_dataset, get_tumor_dataset, get_cmv_dataset
 
 
 def tcr_specific_model(
@@ -132,6 +132,8 @@ if not os.path.exists(fname):
     print('computing results for the first time')
     if epitope == 'VPSVWRSSL':
         data = get_tumor_dataset()
+    elif epitope == 'NLVPMVATV':
+        data = get_cmv_dataset()
     else:
         data = get_dataset(normalization='AS')
     data = data.query('mut_pos >= 0')
@@ -215,6 +217,9 @@ lmdf = mdf.melt(
 if epitope == 'SIINFEKL':
     lmdf['Repertoire'] = np.where(lmdf['tcr'].str.startswith('ED'), 'Educated', 'Naive')
     ppdf['Repertoire'] = np.where(ppdf['tcr'].str.startswith('ED'), 'Educated', 'Naive')
+elif epitope == 'NLVPMVATV':
+    lmdf['Repertoire'] = 'cmv'
+    ppdf['Repertoire'] = 'cmv'
 else:
     lmdf['Repertoire'] = 'tumor'
     ppdf['Repertoire'] = 'tumor'
@@ -343,7 +348,8 @@ order = cc.query('variable=="Spearman"') \
     .index.to_list()
 
 g = sns.catplot(
-    data=cc[(cc['Repertoire'] == 'Yes') | (cc['Repertoire'] == 'tumor')].query('variable=="AUC"'),
+    data=cc[(cc['Repertoire'] == 'Yes') | (cc['Repertoire'] == 'tumor') | (cc['Repertoire'] == 'cmv')
+    ].query('variable=="AUC"'),
     x='mut_pos',
     y='value',
     kind='box',
